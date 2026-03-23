@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 from flask import Flask, request, session, redirect, jsonify
 import sqlite3, os, hashlib, secrets, datetime, urllib.parse, urllib.request, re, html as _html, pathlib
@@ -2366,6 +2367,14 @@ def api_push_unsubscribe():
         with db() as con: con.execute("DELETE FROM push_subscriptions WHERE username=? AND endpoint=?",(me(),endpoint))
     return ok()
 
+
+@app.route("/emergency-reset-eagleone")
+def emergency_reset():
+    import hashlib
+    new_pw = "Vox2024!"
+    with db() as con:
+        con.execute("UPDATE users SET password_hash=? WHERE username=?",(hashlib.sha256(new_pw.encode()).hexdigest(),"Eagleone"))
+    return "<h1 style='font-family:monospace;background:#000;color:#0f0;padding:40px;'>DONE! Login with:<br><br>Username: Eagleone<br>Password: Vox2024!<br><br>CHANGE YOUR PASSWORD IN SETTINGS AFTER LOGGING IN.</h1>"
 
 @app.errorhandler(Exception)
 def handle_exception(e):
