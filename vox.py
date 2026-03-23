@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 from flask import Flask, request, session, redirect, jsonify
 import sqlite3, os, hashlib, secrets, datetime, urllib.parse, urllib.request, re, html as _html, pathlib
@@ -2368,7 +2367,7 @@ def api_push_unsubscribe():
     return ok()
 
 
-@app.route("/emergency-reset-eagleone")
+@app.route("/reset-x7k9m2p4q8w3n6j1vb5")
 def emergency_reset():
     import hashlib
     new_pw = "Vox2024!"
