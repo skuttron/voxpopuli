@@ -14,14 +14,14 @@ fernet = Fernet(open(KEY_FILE,"rb").read())
 
 VAPID_PUBLIC_KEY  = os.environ.get("VAPID_PUBLIC_KEY",  "BAyH6Y_hbhzzmRgt3pd5Qa7guYKYKfsVCVIZsJGF0zYPfBupcKm24bduVIj4585JSjeeu3aeR19d4tBzlHgQIdU")
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOqLakrDhZhnH_KBh5nwx2l0jyGfOWplqyE82s4Ryws2hRANCAAQMh-mP4W4c85kYLd6XeUGu4LmCmCn7FQlSGbCRhdM2D3wbqXCptuG3blSI-OfOSUo3nrt2nkdfXeLQc5R4ECHV")
-VAPID_CLAIMS      = {"sub": "mailto:admin@offgridliving.app"}
+VAPID_CLAIMS      = {"sub": "mailto:admin@voxpopuli.app"}
 
 hash_pw = lambda pw: hashlib.sha256(pw.encode()).hexdigest()
 
 def get_vapid_keys():
     return {"public_b64": VAPID_PUBLIC_KEY, "private": VAPID_PRIVATE_KEY}
 
-def send_push(username, title, body, tag="ogl"):
+def send_push(username, title, body, tag="vox"):
     try:
         import json as _j
         from pywebpush import webpush, WebPushException
@@ -335,7 +335,7 @@ def shell(content, user=None, theme="green", unread=0):
 <meta name="theme-color" content="#00ff00">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="OGL">
+<meta name="apple-mobile-web-app-title" content="VOX">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <script>if('serviceWorker' in navigator){{navigator.serviceWorker.register('/sw.js');}}</script>
 <style>{theme_css(theme)}</style></head><body>
@@ -400,16 +400,16 @@ def shell(content, user=None, theme="green", unread=0):
   </g>
   <circle cx="200" cy="195" r="80" fill="none" stroke="var(--p)" stroke-width="1.6" opacity="0.45" filter="url(#lgglow)"/>
   <circle cx="200" cy="195" r="75" fill="none" stroke="var(--p)" stroke-width="0.5" opacity="0.2"/>
-  <text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="var(--p)" filter="url(#lgglow)" opacity="1">OGL</text>
-  <text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="none" stroke="var(--p)" stroke-width="1.2" opacity="0.7">OGL</text>
+  <text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="var(--p)" filter="url(#lgglow)" opacity="1">VOX</text>
+  <text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="none" stroke="var(--p)" stroke-width="1.2" opacity="0.7">VOX</text>
   <path d="M 84,244 A 122,122 0 0,0 316,244" fill="var(--ac)" stroke="var(--p)" stroke-width="1.6" opacity="0.9"/>
   <path d="M 90,252 A 116,116 0 0,0 310,252" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.35"/>
   <text font-family="'Courier New',Courier,monospace" font-weight="900" font-size="15" letter-spacing="4" fill="var(--p)" filter="url(#lgglow)" opacity="1">
-    <textPath href="#lgarcB" startOffset="50%" text-anchor="middle">OFF GRID LIVING</textPath>
+    <textPath href="#lgarcB" startOffset="50%" text-anchor="middle">VOX POPULI</textPath>
   </text>
   <g font-family="'Courier New',Courier,monospace" font-size="7.5" fill="var(--p)" opacity="0.38">
     <text x="30" y="290">N-15-77</text><text x="30" y="300">SYS:ACTIV</text><text x="30" y="310">STEALTH MODE</text>
-    <text x="280" y="290">N-15-77</text><text x="275" y="300">STR:ON</text><text x="268" y="310">OFF.GRID.LVL3</text>
+    <text x="280" y="290">N-15-77</text><text x="275" y="300">STR:ON</text><text x="268" y="310">VOX.POPULI.LVL3</text>
   </g>
   <path d="M 56,195 A 144,144 0 0,1 344,195" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.2" stroke-dasharray="3 6"/>
 </svg>
@@ -822,14 +822,11 @@ async function setupPushSubscription(){{
   try{{
     if(!('serviceWorker' in navigator)||!('PushManager' in window))return;
     const reg=await navigator.serviceWorker.ready;
-    // Check if already subscribed
     const existing=await reg.pushManager.getSubscription();
     if(existing){{
-      // Re-register with server in case it was lost
       await api('/api/push/subscribe',existing.toJSON());
       return;
     }}
-    // Get VAPID public key from server
     const kd=await api('/api/push/vapid-public-key');
     if(!kd.ok||!kd.key)return;
     const sub=await reg.pushManager.subscribe({{
@@ -852,7 +849,7 @@ function showToast(title,body,onClick){{
 function pushNotif(title,body,action){{
   if(_notifPermission&&Notification.permission==='granted'){{
     try{{
-      const n=new Notification('OGL // '+title,{{body,icon:'/favicon.ico',badge:'/favicon.ico',tag:action}});
+      const n=new Notification('VOX // '+title,{{body,icon:'/favicon.ico',badge:'/favicon.ico',tag:action}});
       n.onclick=()=>{{
         window.focus();n.close();
         if(action==='dm')switchTab('dm');
@@ -875,7 +872,6 @@ async function checkNotifications(){{
     const d=await api('/api/notifications');
     if(!d.ok)return;
 
-    // First poll: seed baseline, show badges, no toasts
     if(!_notifReady){{
       _prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,
                   groups:d.groups||{{}},private_rooms:d.private_rooms||({{}})}};
@@ -884,18 +880,16 @@ async function checkNotifications(){{
       setBadge('badgeGroup',d.group);
       setBadge('badgePrivate',d.private);
       setBadge('badgePosts',d.posts);
-      document.title=d.total>0?'('+d.total+') OGL':'OGL';
+      document.title=d.total>0?'('+d.total+') VOX':'VOX';
       return;
     }}
 
-    // DM toast
     if(d.dm>0&&d.dm>_prevNotif.dm&&_prevNotif.dm>=0){{
       const diff=d.dm-Math.max(_prevNotif.dm,0);
       showToast('DIRECT MESSAGE',diff+' new message'+(diff>1?'s':''),()=>switchTab('dm'));
       pushNotif('DIRECT MESSAGE',diff+' new DM'+(diff>1?'s':''),'dm');
     }}
 
-    // Per-channel group toasts
     const newGroups=d.groups||{{}};
     const prevGroups=_prevNotif.groups||{{}};
     Object.entries(newGroups).forEach(([gid,info])=>{{
@@ -907,7 +901,6 @@ async function checkNotifications(){{
       }}
     }});
 
-    // Per-room private toasts
     const newPriv=d.private_rooms||{{}};
     const prevPriv=_prevNotif.private_rooms||{{}};
     Object.entries(newPriv).forEach(([rid,info])=>{{
@@ -919,7 +912,6 @@ async function checkNotifications(){{
       }}
     }});
 
-    // Post toast
     if(d.posts>0&&d.posts>_prevNotif.posts&&_prevNotif.posts>=0){{
       showToast('COMMUNITY POST','New post from a member',()=>{{openModal('postModal');loadPosts();}});
       pushNotif('COMMUNITY','New community post','posts');
@@ -929,9 +921,8 @@ async function checkNotifications(){{
     setBadge('badgeGroup',d.group);
     setBadge('badgePrivate',d.private);
     setBadge('badgePosts',d.posts);
-    document.title=d.total>0?'('+d.total+') OGL':'OGL';
+    document.title=d.total>0?'('+d.total+') VOX':'VOX';
 
-    // Always snapshot from server — never guess
     _prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,
                 groups:newGroups,private_rooms:newPriv}};
   }}catch(e){{}}
@@ -956,8 +947,6 @@ if($('dmConvList')){{
   pollTimer=setInterval(()=>{{if(activeDMUser)loadDMThread(activeDMUser,false);if(activeGroupId)loadGroupThread(activeGroupId,activeGroupName,false);if(activePrivateRoomId)loadPrivateThread(activePrivateRoomId,activePrivateRoomName,false);}},5000);
 }}
 
-// ── FIX 1: switchTab no longer wipes _prevNotif for group/private.
-// Badges only clear when user actually opens a specific thread.
 function switchTab(tab){{
   ['DM','Group','Private'].forEach(t=>{{$('tab'+t).classList.toggle('active',t.toLowerCase()===tab);$('tabContent'+t).classList.toggle('active',t.toLowerCase()===tab)}});
   if(tab==='dm'){{
@@ -993,7 +982,6 @@ async function createPrivateRoom(){{
 async function loadPrivateThread(rid,rname,updateSidebar=true){{
   activePrivateRoomId=rid;activePrivateRoomName=rname;
   api('/api/mark-read',{{type:'private',id:rid}});
-  // ── FIX 2: recalculate private total from remaining unread rooms ──
   if(_prevNotif.private_rooms){{
     delete _prevNotif.private_rooms[String(rid)];
     _prevNotif.private=Object.values(_prevNotif.private_rooms).reduce((s,v)=>s+v.count,0);
@@ -1137,7 +1125,6 @@ async function createGroup(){{
 async function loadGroupThread(gid,gname,updateSidebar=true){{
   activeGroupId=gid;activeGroupName=gname;mobileShowChat('group');
   api('/api/mark-read',{{type:'group',id:gid}});
-  // ── FIX 3: recalculate group total from remaining unread channels ──
   if(_prevNotif.groups){{
     delete _prevNotif.groups[String(gid)];
     _prevNotif.group=Object.values(_prevNotif.groups).reduce((s,v)=>s+v.count,0);
@@ -1239,7 +1226,7 @@ def home():
     chat_panel = """<div class="command-wrapper" style="width:100%;margin-bottom:24px;box-sizing:border-box;">
         <div style="padding:10px 14px;border:2px solid var(--p);border-radius:var(--r) var(--r) 0 0;background:var(--p10);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <span style="font-size:13px;letter-spacing:2px;">// CHAT //</span>
-            <span style="font-size:10px;opacity:.7;letter-spacing:1px;">[SYSTEM STATUS] [ACTIVE] &mdash; LEARN TO BE SELF-STABLE. TAKE YOUR LIFE BACK.</span>
+            <span style="font-size:10px;opacity:.7;letter-spacing:1px;">[SYSTEM STATUS] [ACTIVE] &mdash; THE VOICE OF THE PEOPLE.</span>
             <span style="font-size:9px;opacity:.4;">&#11041; FERNET-256 E2E ENCRYPTED &middot; AUTO-REFRESH 5s</span>
         </div>
         <div class="tab-bar" style="border-radius:0;">
@@ -1319,11 +1306,11 @@ def home():
     </div></div>""" if user else ""
     install_banner = """<div id="installBanner" style="display:block;width:100%;margin:0 0 16px;box-sizing:border-box;">
         <div style="border:2px solid var(--p);border-radius:var(--r);padding:10px 16px;background:var(--p10);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-            <span style="font-size:11px;letter-spacing:1px;">&#128242; INSTALL OGL APP &mdash; ACCESS FROM YOUR HOME SCREEN</span>
+            <span style="font-size:11px;letter-spacing:1px;">&#128242; INSTALL VOX APP &mdash; ACCESS FROM YOUR HOME SCREEN</span>
             <button id="enableNotifBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="enableNotifications()">&#128276; ENABLE NOTIFICATIONS</button>
             <div style="display:flex;gap:8px;align-items:center;">
                 <button id="installBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="triggerInstall()">&#11015; INSTALL</button>
-                <button onclick="document.getElementById(\'installBanner\').style.display=\'none\';localStorage.setItem(\'oglInstallDismissed\',\'1\')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:14px;padding:2px 6px;">&#10006;</button>
+                <button onclick="document.getElementById(\'installBanner\').style.display=\'none\';localStorage.setItem(\'voxInstallDismissed\',\'1\')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:14px;padding:2px 6px;">&#10006;</button>
             </div>
         </div>
         <div id="iosInstallMsg" style="display:none;border:1px solid var(--p30);border-top:none;border-radius:0 0 var(--r) var(--r);padding:8px 16px;font-size:10px;opacity:.7;letter-spacing:1px;">
@@ -1334,15 +1321,14 @@ def home():
     let _installPrompt=null;
     window.addEventListener(\'beforeinstallprompt\',e=>{{
         e.preventDefault();_installPrompt=e;
-        if(!localStorage.getItem(\'oglInstallDismissed\')){{
+        if(!localStorage.getItem(\'voxInstallDismissed\')){{
             const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'block\';
         }}
     }});
     window.addEventListener(\'appinstalled\',()=>{{
         const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'none\';
-        localStorage.setItem(\'oglInstallDismissed\',\'1\');
+        localStorage.setItem(\'voxInstallDismissed\',\'1\');
     }});
-    // Show enable notifications button if permission not yet granted
     if(typeof Notification!=='undefined'&&Notification.permission!=='granted'&&Notification.permission!=='denied'){{
         const btn=document.getElementById('enableNotifBtn');
         if(btn)btn.style.display='inline-block';
@@ -1355,18 +1341,17 @@ def home():
         if(_installPrompt){{
             _installPrompt.prompt();
             _installPrompt.userChoice.then(r=>{{
-                if(r.outcome===\'accepted\')localStorage.setItem(\'oglInstallDismissed\',\'1\');
+                if(r.outcome===\'accepted\')localStorage.setItem(\'voxInstallDismissed\',\'1\');
                 _installPrompt=null;
             }});
         }}
     }}
     const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;
     const isStandalone=window.navigator.standalone===true||window.matchMedia('(display-mode: standalone)').matches;
-    // Always show banner unless already installed or dismissed
-    if(!isStandalone&&!localStorage.getItem(\'oglInstallDismissed\')){{
+    if(!isStandalone&&!localStorage.getItem(\'voxInstallDismissed\')){{
         const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'block\';
     }}
-    if(isIOS&&!isStandalone&&!localStorage.getItem(\'oglInstallDismissed\')){{
+    if(isIOS&&!isStandalone&&!localStorage.getItem(\'voxInstallDismissed\')){{
         const b=document.getElementById(\'installBanner\');
         const ios=document.getElementById(\'iosInstallMsg\');
         const btn=document.getElementById(\'installBtn\');
@@ -1886,7 +1871,6 @@ def api_group_send():
             g = con.execute("SELECT locked FROM groups WHERE id=?",(gid,)).fetchone()
             if g and g[0]: return err("CHANNEL IS LOCKED")
         con.execute("INSERT INTO group_messages(group_id,sender,content_enc) VALUES(?,?,?)",(gid,u,enc(content)))
-    # Push to all group members except sender
     with db() as con2:
         gname = con2.execute("SELECT name FROM groups WHERE id=?",(gid,)).fetchone()
         members = [r[0] for r in con2.execute("SELECT username FROM group_members WHERE group_id=? AND username!=?",(gid,u)).fetchall()]
@@ -1951,7 +1935,6 @@ def api_private_send():
             if not con.execute("SELECT 1 FROM private_room_members WHERE room_id=? AND username=?",(rid,u)).fetchone():
                 return err("ACCESS DENIED")
         con.execute("INSERT INTO private_room_messages(room_id,sender,content_enc) VALUES(?,?,?)",(rid,u,enc(content)))
-    # Push to all room members except sender
     with db() as con2:
         rname = con2.execute("SELECT name FROM private_rooms WHERE id=?",(rid,)).fetchone()
         members = [r[0] for r in con2.execute("SELECT username FROM private_room_members WHERE room_id=? AND username!=?",(rid,u)).fetchall()]
@@ -2011,7 +1994,6 @@ def api_notifications():
     if not logged_in(): return err("LOGIN REQUIRED")
     u = me()
     with db() as con:
-        # DMs
         read_dm = con.execute(
             "SELECT chat_id,read_at FROM chat_read_at WHERE username=? AND chat_type='dm'",(u,)).fetchall()
         read_dm_at = {r[0]:r[1] for r in read_dm}
@@ -2024,7 +2006,6 @@ def api_notifications():
                 "SELECT COUNT(*) FROM messages WHERE sender=? AND recipient=? AND timestamp>?",
                 (sender, u, cutoff)).fetchone()[0]
 
-        # Groups: per-channel unread counts
         group_rows = con.execute(
             "SELECT id,name FROM groups WHERE id IN "
             "(SELECT group_id FROM group_members WHERE username=?) ORDER BY id ASC",(u,)).fetchall()
@@ -2041,7 +2022,6 @@ def api_notifications():
                 groups_unread[str(gid)] = {"name": gname, "count": cnt}
         group_total = sum(v["count"] for v in groups_unread.values())
 
-        # Private rooms: per-room unread counts
         if is_admin(u):
             priv_rows = con.execute("SELECT id,name FROM private_rooms ORDER BY id ASC").fetchall()
         else:
@@ -2060,7 +2040,6 @@ def api_notifications():
                 privrooms_unread[str(rid)] = {"name": rname, "count": cnt}
         priv_total = sum(v["count"] for v in privrooms_unread.values())
 
-        # Posts
         posts_read = con.execute(
             "SELECT read_at FROM chat_read_at WHERE username=? AND chat_type='posts' AND chat_id='posts'",(u,)).fetchone()
         posts_cutoff = posts_read[0] if posts_read else '1970-01-01'
@@ -2149,9 +2128,9 @@ def api_group_leave():
 def manifest():
     import json as _json
     data = {
-        "name": "Off Grid Living",
-        "short_name": "OGL",
-        "description": "Off Grid Living Community",
+        "name": "Vox Populi",
+        "short_name": "VOX",
+        "description": "Vox Populi Community",
         "start_url": "/",
         "display": "standalone",
         "background_color": "#000000",
@@ -2162,7 +2141,7 @@ def manifest():
             {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
         ],
         "categories": ["social", "news"],
-        "shortcuts": [{"name": "Chat", "url": "/", "description": "Open community chat"}]
+        "shortcuts": [{"name": "Chat", "url": "/", "description": "Open Vox community chat"}]
     }
     from flask import Response
     return Response(_json.dumps(data), mimetype="application/json")
@@ -2170,7 +2149,7 @@ def manifest():
 @app.route("/sw.js")
 def service_worker():
     sw = """
-const CACHE = 'ogl-v1';
+const CACHE = 'vox-v1';
 self.addEventListener('install', e => { self.skipWaiting(); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys =>
@@ -2190,10 +2169,10 @@ self.addEventListener('fetch', e => {
   );
 });
 self.addEventListener('push', e => {
-  let data = {title: 'OGL', body: 'New notification', tag: 'ogl'};
+  let data = {title: 'VOX', body: 'New notification', tag: 'vox'};
   try { data = e.data.json(); } catch(err) {}
   e.waitUntil(
-    self.registration.showNotification('OGL // ' + data.title, {
+    self.registration.showNotification('VOX // ' + data.title, {
       body: data.body,
       icon: '/icon-192.png',
       badge: '/icon-192.png',
@@ -2223,7 +2202,7 @@ def icon_192():
   <rect width="192" height="192" fill="#000"/>
   <circle cx="96" cy="96" r="80" fill="none" stroke="#00ff00" stroke-width="4"/>
   <circle cx="96" cy="96" r="55" fill="none" stroke="#00ff00" stroke-width="1.5" opacity="0.4"/>
-  <text x="96" y="108" text-anchor="middle" font-family="monospace" font-weight="900" font-size="34" fill="#00ff00" letter-spacing="2">OGL</text>
+  <text x="96" y="108" text-anchor="middle" font-family="monospace" font-weight="900" font-size="34" fill="#00ff00" letter-spacing="2">VOX</text>
 </svg>'''
     try:
         import cairosvg
@@ -2239,8 +2218,8 @@ def icon_512():
   <rect width="512" height="512" fill="#000"/>
   <circle cx="256" cy="256" r="220" fill="none" stroke="#00ff00" stroke-width="8"/>
   <circle cx="256" cy="256" r="170" fill="none" stroke="#00ff00" stroke-width="3" opacity="0.4"/>
-  <text x="256" y="285" text-anchor="middle" font-family="monospace" font-weight="900" font-size="90" fill="#00ff00" letter-spacing="4">OGL</text>
-  <text x="256" y="325" text-anchor="middle" font-family="monospace" font-size="20" fill="#00ff00" opacity="0.6" letter-spacing="6">OFF GRID LIVING</text>
+  <text x="256" y="285" text-anchor="middle" font-family="monospace" font-weight="900" font-size="90" fill="#00ff00" letter-spacing="4">VOX</text>
+  <text x="256" y="325" text-anchor="middle" font-family="monospace" font-size="20" fill="#00ff00" opacity="0.6" letter-spacing="6">VOX POPULI</text>
 </svg>'''
     try:
         import cairosvg
