@@ -77,6 +77,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS private_room_members(room_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(room_id,username));
         CREATE TABLE IF NOT EXISTS private_room_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,room_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS push_subscriptions(username TEXT NOT NULL,endpoint TEXT NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,PRIMARY KEY(username,endpoint));
+        CREATE TABLE IF NOT EXISTS password_resets(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,temp_password TEXT,status TEXT DEFAULT 'pending',requested_at TEXT DEFAULT CURRENT_TIMESTAMP);
         """)
         c = con.cursor()
         for col,tbl in [("is_admin INTEGER DEFAULT 0","users"),("locked INTEGER DEFAULT 0","groups")]:
@@ -320,6 +321,7 @@ def shell(content, user=None, theme="green", unread=0):
             <button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowGroups()">&#128483; GROUP LOGS</button>
             <button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowLookup()">&#128269; CHAT LOOKUP</button>
             <button class="btn-action" style="margin:0;padding:8px;font-size:11px;grid-column:span 2;" onclick="adminShowTraffic()">&#128200; TRAFFIC</button>
+            <button class="btn-action" style="margin:0;padding:8px;font-size:11px;grid-column:span 2;border-color:#fb0;color:#fb0;" onclick="adminShowResets()">&#128274; PASSWORD RESETS</button>
         </div>
         <div id="adminLookupBar" style="display:none;margin-bottom:8px;">
             <div style="display:flex;gap:6px;">
@@ -449,6 +451,17 @@ def shell(content, user=None, theme="green", unread=0):
     {pw_field("loginPass","PASSWORD")}<br>
     <button class="btn-action" onclick="doLogin()">&#9658; AUTHENTICATE</button>
     <button class="btn-action" style="margin-left:8px;" onclick="closeModal('loginModal')">&#10006; CANCEL</button>
+    <div style="margin-top:14px;font-size:11px;opacity:.6;">FORGOT YOUR PASSWORD? <span style="text-decoration:underline;cursor:pointer;color:var(--p);" onclick="closeModal('loginModal');openModal('resetModal')">REQUEST A RESET</span></div>
+</div></div>
+<div class="modal-overlay" id="resetModal"><div class="modal-box">
+    <h2>// PASSWORD RESET //</h2>
+    <div style="font-size:11px;opacity:.6;margin-bottom:14px;">ENTER YOUR USERNAME AND AN ADMIN WILL SET A TEMPORARY PASSWORD FOR YOU.</div>
+    <div id="resetErr" class="error-msg"></div>
+    <div id="resetOk" class="success-msg"></div>
+    <input class="field-plain" id="resetUser" placeholder="YOUR USERNAME" type="text" style="text-transform:none;">
+    <br>
+    <button class="btn-action" onclick="doResetRequest()">&#9658; REQUEST RESET</button>
+    <button class="btn-action" style="margin-left:8px;" onclick="closeModal('resetModal')">&#10006; CANCEL</button>
 </div></div>
 <div class="modal-overlay" id="registerModal"><div class="modal-box">
     <h2>// ENLIST //</h2>
@@ -536,6 +549,15 @@ async function doRegister(){{
   if(p!==p2){{$('regErr').textContent='PASSWORDS DO NOT MATCH';return}}
   const d=await api('/api/register',{{username:$('regUser').value.trim(),password:p,theme:regThemeVal}});
   d.ok?location.reload():$('regErr').textContent='ERROR: '+d.error;
+}}
+async function doResetRequest(){{
+  const u=$('resetUser').value.trim();
+  const err=$('resetErr'),ok=$('resetOk');
+  err.textContent='';ok.textContent='';
+  if(!u){{err.textContent='USERNAME REQUIRED';return;}}
+  const d=await api('/api/reset/request',{{username:u}});
+  if(d.ok){{ok.textContent='REQUEST SENT — AN ADMIN WILL SET A TEMP PASSWORD FOR YOU. CHECK BACK SOON AND TRY LOGGING IN.';}}
+  else err.textContent='ERROR: '+d.error;
 }}
 async function changePassword(){{
   const cur=$('pwCurrent').value,nw=$('pwNew').value,nw2=$('pwNew2').value,err=$('pwErr'),ok=$('pwOk');
@@ -933,6 +955,41 @@ async function checkNotifications(){{
   }}catch(e){{}}
 }}
 
+async function adminShowResets(){{
+  $('adminLookupBar').style.display='none';
+  adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';
+  const d=await api('/api/admin/reset-requests');
+  if(!d.ok){{adminErr('ERROR');return;}}
+  if(!d.requests.length){{adminBox().innerHTML='<div style="padding:12px;opacity:.4;text-align:center;">NO PENDING RESET REQUESTS</div>';return;}}
+  let html='<div style="padding:6px 10px;opacity:.5;font-size:10px;border-bottom:1px solid var(--p10);">&#128274; PASSWORD RESET REQUESTS</div>';
+  d.requests.forEach(r=>{{
+    html+=`<div style="padding:10px;border-bottom:1px solid var(--p10);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+      <div>
+        <span style="font-size:12px;">${{r.username}}</span>
+        <span style="font-size:10px;opacity:.5;margin-left:8px;">${{r.requested_at}}</span>
+        ${{r.temp_password?`<div style="font-size:11px;margin-top:4px;color:#4f4;">TEMP PW: <b>${{r.temp_password}}</b></div>`:''}}
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;">
+        <input id="tmpPw_${{r.id}}" class="field-plain" placeholder="SET TEMP PW..." style="margin:0;padding:5px 8px;font-size:11px;width:120px;border-radius:6px;">
+        <button class="btn-action" style="margin:0;padding:4px 10px;font-size:10px;" onclick="adminApproveReset(${{r.id}})">&#10003; SET</button>
+        <button class="btn-action" style="margin:0;padding:4px 10px;font-size:10px;border-color:#f44;color:#f44;" onclick="adminDenyReset(${{r.id}})">&#10006;</button>
+      </div>
+    </div>`;
+  }});
+  adminBox().innerHTML=html;
+}}
+async function adminApproveReset(id){{
+  const inp=document.getElementById('tmpPw_'+id);
+  const pw=inp?inp.value.trim():'';
+  if(!pw){{alert('ENTER A TEMPORARY PASSWORD');return;}}
+  const d=await api('/api/admin/reset-approve',{{id,temp_password:pw}});
+  d.ok?adminShowResets():alert('ERROR: '+d.error);
+}}
+async function adminDenyReset(id){{
+  if(!confirm('DENY THIS RESET REQUEST?'))return;
+  const d=await api('/api/admin/reset-deny',{{id}});
+  d.ok?adminShowResets():alert('ERROR: '+d.error);
+}}
 async function loadTrafficCounter(){{
   try{{const d=await api('/api/traffic/public');if(d.ok){{$('tcOnline').textContent=d.online;$('tcToday').textContent=d.today;$('tcTotal').textContent=d.total;if($('tcMembers'))$('tcMembers').textContent=d.members;}}}}catch(e){{}}
 }}
@@ -2234,6 +2291,53 @@ def icon_512():
         from flask import Response
         return Response(svg, mimetype="image/svg+xml")
 
+
+# ── PASSWORD RESET ───────────────────────────────────────────────────────────
+@app.route("/api/reset/request", methods=["POST"])
+def api_reset_request():
+    username = (request.json or {}).get("username","").strip()
+    if not username: return err("USERNAME REQUIRED")
+    with db() as con:
+        if not con.execute("SELECT id FROM users WHERE username=?",(username,)).fetchone():
+            return err("USERNAME NOT FOUND")
+        # Don't allow duplicate pending requests
+        existing = con.execute("SELECT id FROM password_resets WHERE username=? AND status='pending'",(username,)).fetchone()
+        if existing: return ok()  # silently ok so user knows to wait
+        con.execute("INSERT INTO password_resets(username) VALUES(?)",(username,))
+    return ok()
+
+@app.route("/api/admin/reset-requests")
+def api_admin_reset_requests():
+    if not require_admin(): return err("FORBIDDEN")
+    with db() as con:
+        rows = con.execute("SELECT id,username,temp_password,status,requested_at FROM password_resets WHERE status='pending' ORDER BY requested_at DESC").fetchall()
+    return ok(requests=[{"id":r[0],"username":r[1],"temp_password":r[2],"status":r[3],"requested_at":r[4]} for r in rows])
+
+@app.route("/api/admin/reset-approve", methods=["POST"])
+def api_admin_reset_approve():
+    if not require_admin(): return err("FORBIDDEN")
+    d = request.json or {}
+    rid = d.get("id"); temp_pw = d.get("temp_password","").strip()
+    if not rid or not temp_pw: return err("MISSING FIELDS")
+    if len(temp_pw) < 4: return err("TEMP PASSWORD TOO SHORT")
+    with db() as con:
+        row = con.execute("SELECT username FROM password_resets WHERE id=?",(rid,)).fetchone()
+        if not row: return err("REQUEST NOT FOUND")
+        username = row[0]
+        # Set the temp password on the user account
+        con.execute("UPDATE users SET password_hash=? WHERE username=?",(hash_pw(temp_pw),username))
+        # Mark request as approved and store temp pw so admin can see it
+        con.execute("UPDATE password_resets SET status='approved',temp_password=? WHERE id=?",(temp_pw,rid))
+    return ok()
+
+@app.route("/api/admin/reset-deny", methods=["POST"])
+def api_admin_reset_deny():
+    if not require_admin(): return err("FORBIDDEN")
+    rid = (request.json or {}).get("id")
+    if not rid: return err("MISSING ID")
+    with db() as con:
+        con.execute("UPDATE password_resets SET status='denied' WHERE id=?",(rid,))
+    return ok()
 
 @app.route("/api/push/vapid-public-key")
 def api_vapid_public_key():
