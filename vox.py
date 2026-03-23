@@ -6,7 +6,12 @@ from cryptography.fernet import Fernet
 
 _BASE = pathlib.Path(__file__).parent.resolve()
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)
+SECRET_KEY_FILE = str(_BASE/"secret_key.txt")
+if not os.path.exists(SECRET_KEY_FILE):
+    open(SECRET_KEY_FILE,"w").write("1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38")
+app.secret_key = open(SECRET_KEY_FILE,"r").read().strip() or "1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38"
+app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(days=90)
+app.config['SESSION_PERMANENT'] = True
 DB, ADMIN_USER, KEY_FILE = str(_BASE/"ogl.db"), "Eagleone", str(_BASE/"secret.key")
 
 if not os.path.exists(KEY_FILE): open(KEY_FILE,"wb").write(Fernet.generate_key())
@@ -1403,7 +1408,7 @@ def api_register():
             con.execute("INSERT INTO users(username,password_hash,theme,is_admin) VALUES(?,?,?,?)",(u,hash_pw(p),t,1 if u==ADMIN_USER else 0))
             for (gid,) in con.execute("SELECT id FROM groups").fetchall():
                 con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)",(gid,u))
-        session["username"]=u; session["theme"]=t; return ok()
+        session["username"]=u; session["theme"]=t; session.permanent=True; return ok()
     except sqlite3.IntegrityError: return err("USERNAME TAKEN")
 
 @app.route("/api/login", methods=["POST"])
@@ -1415,7 +1420,7 @@ def api_login():
         for (gid,) in con.execute("SELECT id FROM groups").fetchall():
             if not con.execute("SELECT 1 FROM group_banned WHERE group_id=? AND username=?",(gid,u)).fetchone():
                 con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)",(gid,u))
-    session["username"]=u; session["theme"]=row[1]; return ok()
+    session["username"]=u; session["theme"]=row[1]; session.permanent=True; return ok()
 
 # ── POSTS ─────────────────────────────────────────────────────────────────────
 VALID_EMOJIS = {"like","dislike","love","lol","wow","angry","fire"}
