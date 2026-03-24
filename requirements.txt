@@ -8,3 +8,7 @@ Flask
 Flask-Bcrypt
 psycopg2-binary
 cryptography
+Flask==3.0.0
+flask-bcrypt==1.0.1
+psycopg2-binary==2.9.9
+cryptography==41.0.0
