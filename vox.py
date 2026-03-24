@@ -148,7 +148,9 @@ def is_admin(u=None):
     if not u: return False
     if u == ADMIN_USER: return True
     with db() as con:
-        r = con.execute("SELECT is_admin FROM users WHERE username=%s", (u,)).fetchone()
+        cur = con.cursor()
+        cur.execute("SELECT is_admin FROM users WHERE username=%s", (u,))
+        r = cur.fetchone()
     return bool(r and r[0])
 
 def require_login():
@@ -205,9 +207,21 @@ def track_visit():
     if request.path.startswith(("/api", "/static")): return
     now = utc_now()
     with db() as con:
-        con.execute("INSERT OR IGNORE INTO visits(date,ip) VALUES(?,?)", (datetime.date.today().isoformat(), get_ip()))
+        # Create a cursor first
+        cur = con.cursor()
+        
+        # Change 1: Use %s instead of ?
+        # Change 2: Use ON CONFLICT DO NOTHING instead of INSERT OR IGNORE
+        cur.execute("INSERT INTO visits(date,ip) VALUES(%s,%s) ON CONFLICT DO NOTHING", 
+                    (datetime.date.today().isoformat(), get_ip()))
+        
         u = session.get("username")
-        if u: con.execute("INSERT OR REPLACE INTO user_sessions(username,last_seen) VALUES(?,?)", (u, now))
+        if u: 
+            # Change 3: Use ON CONFLICT DO UPDATE instead of INSERT OR REPLACE
+            cur.execute("""
+                INSERT INTO user_sessions(username,last_seen) VALUES(%s,%s) 
+                ON CONFLICT (username) DO UPDATE SET last_seen = EXCLUDED.last_seen
+            """, (u, now))
 
 # ── CSS / HTML HELPERS ────────────────────────────────────────────────────────
 
