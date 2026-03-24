@@ -1432,16 +1432,37 @@ def api_register():
 def api_login():
     d = request.json
     u, p = d.get("username","").strip(), d.get("password","")
+    
     with db() as con:
-        with db() as con:
-    cur = con.cursor()
-    cur.execute("SELECT password_hash,theme FROM users WHERE username=%s", (u,))
-    row = cur.fetchone()
-        if not row or row[0] != p: return err("INVALID CREDENTIALS")
-        for (gid,) in con.execute("SELECT id FROM groups").fetchall():
-            if not con.execute("SELECT 1 FROM group_banned WHERE group_id=? AND username=%s", (gid, u)).fetchone():
-                con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, u))
-    session["username"] = u; session["theme"] = row[1]; session.permanent = True
+        cur = con.cursor()
+        
+        # 1. Fetch user data
+        cur.execute("SELECT password_hash, theme FROM users WHERE username=%s", (u,))
+        row = cur.fetchone()
+        
+        # 2. Check password (using your hash_pw function if applicable, or raw check)
+        if not row or row[0] != hash_pw(p): 
+            return err("INVALID CREDENTIALS")
+            
+        # 3. Handle group auto-joining
+        cur.execute("SELECT id FROM groups")
+        groups = cur.fetchall()
+        
+        for (gid,) in groups:
+            # Check if banned
+            cur.execute("SELECT 1 FROM group_banned WHERE group_id=%s AND username=%s", (gid, u))
+            if not cur.fetchone():
+                # Postgres equivalent of INSERT OR IGNORE
+                cur.execute("""
+                    INSERT INTO group_members (group_id, username) 
+                    VALUES (%s, %s) 
+                    ON CONFLICT DO NOTHING
+                """, (gid, u))
+                
+    # 4. Set session
+    session["username"] = u
+    session["theme"] = row[1]
+    session.permanent = True
     return ok()
 
 @app.route("/logout")
