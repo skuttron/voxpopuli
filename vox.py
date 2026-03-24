@@ -62,7 +62,7 @@ NAV_ITEMS = [
 # ── DB ────────────────────────────────────────────────────────────────────────
 
 @contextmanager
-def db():
+def db(): return psycop2.connect(os.environ.get('DATABASE_URL'))
     con = sqlite3.connect(DB)
     try: yield con
     finally: con.commit(); con.close()
