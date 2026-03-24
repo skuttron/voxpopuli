@@ -91,7 +91,7 @@ def init_db():
         """)
         c = con.cursor()
         c.execute("UPDATE chat_read_at SET read_at = replace(substr(read_at,1,19),'T',' ') WHERE read_at LIKE '%T%'")
-        c.execute("UPDATE users SET is_admin=1 WHERE username=?", (ADMIN_USER,))
+        c.execute("UPDATE users SET is_admin=1 WHERE username=%s", (ADMIN_USER,))
         for ch in ["GENERAL", "SURVIVAL", "BARTER", "HOMESTEAD"]:
             c.execute("INSERT OR IGNORE INTO groups(name,created_by) VALUES(?,?)", (ch, "SYSTEM"))
         users  = [r[0] for r in c.execute("SELECT username FROM users").fetchall()]
@@ -150,7 +150,7 @@ def utc_cutoff(minutes=2):
 def read_at_map(con, username, chat_type):
     """Returns {chat_id: read_at} for a user/type."""
     return {r[0]: r[1] for r in con.execute(
-        "SELECT chat_id,read_at FROM chat_read_at WHERE username=? AND chat_type=?",
+        "SELECT chat_id,read_at FROM chat_read_at WHERE username=%s AND chat_type=?",
         (username, chat_type)).fetchall()}
 
 def unread_count(con, table, id_col, id_val, username, cutoff):
