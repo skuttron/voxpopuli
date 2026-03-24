@@ -1,6 +1,6 @@
 flask==2.3.3
-
-gunicorn
 psycop2b-binary
+gunicorn
+
 werkzeug==2.3.7
 psycopg2-binary
