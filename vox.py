@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 from flask import Flask, request, session, redirect, jsonify, Response
 import sqlite3, os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
@@ -5,22 +6,14 @@ from contextlib import contextmanager
 from cryptography.fernet import Fernet
 
 _BASE = pathlib.Path(__file__).parent.resolve()
-# DATA_DIR: set RAILWAY_VOLUME_MOUNT_PATH env var to your volume mount path,
-# otherwise falls back to the app directory (no persistence on Railway).
-# Use VOLUME_PATH env var if set (Railway volume), otherwise app directory
-_DATA = pathlib.Path(os.environ.get("VOLUME_PATH", str(_BASE)))
-_DATA.mkdir(parents=True, exist_ok=True)
-
 app = Flask(__name__)
-SECRET_KEY_FILE = str(_DATA/"secret_key.txt")
+SECRET_KEY_FILE = str(_BASE/"secret_key.txt")
 if not os.path.exists(SECRET_KEY_FILE):
     open(SECRET_KEY_FILE,"w").write("1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38")
 app.secret_key = open(SECRET_KEY_FILE,"r").read().strip() or "1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38"
 app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(days=90)
 app.config['SESSION_PERMANENT'] = True
-DB = os.environ.get("DB_PATH", str(_DATA/"ogl.db"))
-ADMIN_USER = "Eagleone"
-KEY_FILE = str(_DATA/"secret.key")
+DB, ADMIN_USER, KEY_FILE = str(_BASE/"ogl.db"), "Eagleone", str(_BASE/"secret.key")
 
 if not os.path.exists(KEY_FILE): open(KEY_FILE,"wb").write(Fernet.generate_key())
 fernet = Fernet(open(KEY_FILE,"rb").read())
@@ -111,18 +104,7 @@ def is_admin(u=None):
     with db() as con: r = con.execute("SELECT is_admin FROM users WHERE username=?",(u,)).fetchone()
     return bool(r and r[0])
 
-@app.before_request
-def ensure_admin_flag():
-    """Keep root admin's is_admin flag correct in DB on every request."""
-    u = session.get("username")
-    if u == ADMIN_USER:
-        with db() as con:
-            con.execute("UPDATE users SET is_admin=1 WHERE username=?",(ADMIN_USER,))
-
-def require_admin():
-    u = me()
-    if not u: return False
-    return is_admin(u)
+require_admin = lambda: is_admin(me())
 
 @app.before_request
 def track_visit():
@@ -596,7 +578,7 @@ const msgRow=(m,fn)=>`<div style="padding:6px 10px 6px 20px;border-top:1px solid
 async function adminShowUsers(){{
   adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';
   const d=await api('/api/admin/users');
-  if(!d.ok){{adminErr('ERROR: '+(d.error||'ACCESS DENIED'));return}}
+  if(!d.ok){{adminErr('ACCESS DENIED');return}}
   const dot='<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#0f0;box-shadow:0 0 5px #0f0;margin-right:5px;vertical-align:middle;"></span>';
   adminBox().innerHTML='<div style="padding:6px 10px;opacity:.5;font-size:10px;border-bottom:1px solid var(--p10);">&#128100; USERS</div>'+
     d.users.map(u=>`<div style="padding:8px 10px;border-bottom:1px solid var(--p10);display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -1209,32 +1191,20 @@ async function loadGroupThread(gid,gname,updateSidebar=true){{
   const renameBtnG=d.admin?`<button onclick="renameChat('group',${{gid}})" style="background:none;border:1px solid var(--p);border-radius:4px;color:var(--p);cursor:pointer;font-size:9px;padding:2px 7px;margin-left:6px;font-family:'Courier New',monospace;">&#9998;</button>`:'';
   hdr.innerHTML='# '+(gname||'CHANNEL')+lockBadge+renameBtnG;
   const jlBtn=$('joinLeaveBtn');
-  if(d.admin){{
+  if(d.admin&&d.members&&d.members.length){{
     jlBtn.style.display='inline-block';jlBtn.textContent='&#128100; MEMBERS &#9663;';
     jlBtn.onclick=()=>{{
       const existing=$('memberDropdown');if(existing){{existing.remove();return}}
       const dd=document.createElement('div');
       dd.id='memberDropdown';
-      dd.style.cssText='position:absolute;right:0;top:100%;background:#000;border:2px solid var(--p);border-radius:8px;z-index:9999;min-width:260px;box-shadow:0 0 20px var(--p30);max-height:300px;overflow-y:auto;';
-      const members=d.members||[];
-      dd.innerHTML=`<div style="padding:8px 12px;border-bottom:1px solid var(--p30);position:relative;">
-        <div style="display:flex;gap:6px;">
-          <input id="addGroupMemberInput" class="field-plain" placeholder="&#128269; ADD USER..." style="margin:0;flex:1;padding:6px 10px;font-size:11px;border-radius:20px;" autocomplete="off" oninput="groupMemberSuggest(${{gid}})" onkeydown="if(event.key==='Escape')hideGroupMemberSuggest();">
-          <button class="btn-action" style="margin:0;padding:4px 10px;font-size:10px;" onclick="addGroupMember(${{gid}})">ADD</button>
-        </div>
-        <div id="groupMemberSuggest" style="display:none;position:absolute;left:12px;right:12px;top:calc(100% - 4px);background:#000;border:2px solid var(--p);border-radius:8px;box-shadow:0 0 20px var(--p30);z-index:99999;max-height:140px;overflow-y:auto;font-size:11px;"></div>
-      </div>
-      <div style="padding:6px 12px;font-size:9px;opacity:.5;border-bottom:1px solid var(--p30);">&#128100; ${{members.length}} MEMBERS</div>`+
-      members.map(u=>`<div style="padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--p10);font-size:11px;">
+      dd.style.cssText='position:absolute;right:0;top:100%;background:#000;border:2px solid var(--p);border-radius:8px;z-index:9999;min-width:200px;box-shadow:0 0 20px var(--p30);max-height:200px;overflow-y:auto;';
+      dd.innerHTML=`<div style="padding:6px 12px;font-size:9px;opacity:.5;border-bottom:1px solid var(--p30);">&#128100; MEMBERS</div>`+
+      d.members.map(u=>`<div style="padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--p10);font-size:11px;">
         <span>${{onlineUsers.has(u)?'<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#0f0;box-shadow:0 0 5px #0f0;margin-right:5px;vertical-align:middle;"></span>':''}}${{u}}</span>
-        <button class="btn-action" style="margin:0;padding:2px 8px;font-size:10px;border-color:#f44;color:#f44;" onclick="groupKick(${{gid}},'${{u}}')">KICK</button>
       </div>`).join('');
       jlBtn.parentElement.style.position='relative';
       jlBtn.parentElement.appendChild(dd);
-      setTimeout(()=>{{
-        const inp=$('addGroupMemberInput');if(inp)inp.focus();
-        document.addEventListener('click',function h(e){{if(!dd.contains(e.target)&&e.target!==jlBtn){{dd.remove();document.removeEventListener('click',h)}}}});
-      }},0);
+      setTimeout(()=>document.addEventListener('click',function h(e){{if(!dd.contains(e.target)&&e.target!==jlBtn){{dd.remove();document.removeEventListener('click',h)}}}}),0);
     }};
   }} else jlBtn.style.display='none';
   $('groupCompose').style.display=d.member&&!d.locked?'flex':'none';
@@ -1262,25 +1232,6 @@ async function groupBan(gid,u){{
   await api('/api/groups/ban',{{group_id:gid,username:u}});
   const dd=$('memberDropdown');if(dd)dd.remove();
   loadGroupThread(gid,activeGroupName,true);
-}}
-async function groupMemberSuggest(gid){{
-  const q=$('addGroupMemberInput').value.trim(),box=$('groupMemberSuggest');
-  if(!q){{if(box)box.style.display='none';return;}}
-  const d=await api('/api/users/search?q='+encodeURIComponent(q));
-  if(!box)return;
-  if(!d.ok||!d.users.length){{box.style.display='none';return;}}
-  box.style.display='block';
-  box.innerHTML=d.users.map(u=>`<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--p10);" onmouseover="this.style.background='var(--p10)'" onmouseout="this.style.background=''" onmousedown="event.preventDefault();$('addGroupMemberInput').value='${{u}}';hideGroupMemberSuggest();">&#128100; ${{u}}</div>`).join('');
-}}
-function hideGroupMemberSuggest(){{const b=$('groupMemberSuggest');if(b)b.style.display='none';}}
-async function addGroupMember(gid){{
-  hideGroupMemberSuggest();
-  const u=$('addGroupMemberInput').value.trim();if(!u)return;
-  const d=await api('/api/groups/add-member',{{group_id:gid,username:u}});
-  if(!d.ok){{alert('ERROR: '+d.error);return;}}
-  $('addGroupMemberInput').value='';
-  loadGroupThread(gid,activeGroupName,true);
-  const dd=$('memberDropdown');if(dd)dd.remove();
 }}
 async function sendGroupMsg(){{
   const content=$('groupInput').value.trim();if(!content||activeGroupId===null)return;
@@ -1917,17 +1868,6 @@ def api_group_unban():
         con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)",(gid,target))
     return ok()
 
-@app.route("/api/groups/add-member", methods=["POST"])
-def api_group_add_member():
-    if not require_admin(): return err("FORBIDDEN")
-    d = request.json; gid,target = d.get("group_id"), d.get("username","").strip()
-    if not gid or not target: return err("MISSING FIELDS")
-    with db() as con:
-        if not con.execute("SELECT id FROM users WHERE username=?",(target,)).fetchone(): return err("USER NOT FOUND")
-        con.execute("DELETE FROM group_banned WHERE group_id=? AND username=?",(gid,target))
-        con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)",(gid,target))
-    return ok()
-
 @app.route("/api/groups")
 def api_groups():
     if not logged_in(): return jsonify({"ok":False})
@@ -2410,13 +2350,6 @@ def api_push_unsubscribe():
         with db() as con: con.execute("DELETE FROM push_subscriptions WHERE username=? AND endpoint=?",(me(),endpoint))
     return ok()
 
-
-@app.route("/debug-db-path")
-def debug_db_path():
-    if not require_admin(): return err("FORBIDDEN")
-    with db() as con:
-        users = con.execute("SELECT username, is_admin, created_at FROM users ORDER BY created_at").fetchall()
-    return f"<pre style='background:#000;color:#0f0;padding:20px;font-family:monospace;'>DB PATH: {DB}\n\nUSERS ({len(users)}):\n" + "\n".join(f"  {r[0]} | admin={r[1]} | {r[2]}" for r in users) + "</pre>"
 
 @app.route("/reset-x7k9m2p4q8w3n6j1vb5")
 def emergency_reset():
