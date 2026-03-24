@@ -4,3 +4,7 @@ pywebpush
 gunicorn
 setuptools
 werkzeug==2.3.7
+Flask
+Flask-Bcrypt
+psycopg2-binary
+cryptography
