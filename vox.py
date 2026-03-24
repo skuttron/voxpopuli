@@ -1447,7 +1447,7 @@ def home():
         <div class="three-column-grid">
             <div class="column"><h3>THE TRUTH</h3><p>Wealth gap and corporate reliance truth.</p><a class="btn-action" href="https://www.youtube.com/watch?v=pb0OCI9qwIU" target="_blank" rel="noopener noreferrer">&#9658; WATCH</a></div>
             <div class="column"><h3>ORGANIZE</h3><p>Grow food, barter, and rebuild community.</p><a class="btn-action" href="https://www.youtube.com/watch?v=shIfzNOcNvs" target="_blank" rel="noopener noreferrer">&#9658; LEARN</a></div>
-            <div class="column"><h3>COMMUNITY</h3><p>Join our TikTok community and say hello!</p><a class="btn-action" href="https://www.tiktok.com/@offgridguru13" target="_blank" rel="noopener noreferrer">&#9658; ACCESS</a></div>
+            <div class="column"><h3>COMMUNITY</h3><p>Join our TikTok community and say hello!</p><a class="btn-action" href="#" target="_blank" rel="noopener noreferrer">&#9658; ACCESS</a></div>
         </div>
         <iframe class="top-video" src="https://www.youtube.com/embed/Ee_uujKuJMI?loop=1&playlist=Ee_uujKuJMI" frameborder="0" allow="encrypted-media" allowfullscreen></iframe></div>"""
     return shell(content, user=user, theme=theme, unread=unread)
