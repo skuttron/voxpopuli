@@ -30,11 +30,11 @@ hash_pw = lambda pw: hashlib.sha256(pw.encode()).hexdigest()
 enc     = lambda t: fernet.encrypt(t.encode()).decode()
 dec     = lambda t: fernet.decrypt(t.encode()).decode() if t else ""
 
-get_ip     = lambda: request.headers.get("X-Forwarded-For", request.remote_addr).split(",")[0].strip()
-logged_in  = lambda: "username" in session
-me         = lambda: session.get("username", "")
-ok         = lambda **kw: jsonify({"ok": True, **kw})
-err        = lambda e: jsonify({"ok": False, "error": e})
+get_ip    = lambda: request.headers.get("X-Forwarded-For", request.remote_addr).split(",")[0].strip()
+logged_in = lambda: "username" in session
+me        = lambda: session.get("username", "")
+ok        = lambda **kw: jsonify({"ok": True, **kw})
+err       = lambda e: jsonify({"ok": False, "error": e})
 
 VALID_EMOJIS = {"like", "dislike", "love", "lol", "wow", "angry", "fire"}
 
@@ -113,6 +113,14 @@ def is_admin(u=None):
         r = con.execute("SELECT is_admin FROM users WHERE username=?", (u,)).fetchone()
     return bool(r and r[0])
 
+def require_login():
+    """Returns an error response if not logged in, else None."""
+    if not logged_in(): return err("NOT LOGGED IN")
+
+def require_admin():
+    """Returns an error response if not admin, else None."""
+    if not is_admin(): return err("FORBIDDEN")
+
 def send_push(username, title, body, tag="vox"):
     try:
         from pywebpush import webpush
@@ -132,10 +140,32 @@ def send_push(username, title, body, tag="vox"):
     except Exception:
         pass
 
+def utc_now():
+    return datetime.datetime.utcnow().isoformat()
+
+def utc_cutoff(minutes=2):
+    return (datetime.datetime.utcnow() - datetime.timedelta(minutes=minutes)).isoformat()
+
+def read_at_map(con, username, chat_type):
+    """Returns {chat_id: read_at} for a user/type."""
+    return {r[0]: r[1] for r in con.execute(
+        "SELECT chat_id,read_at FROM chat_read_at WHERE username=? AND chat_type=?",
+        (username, chat_type)).fetchall()}
+
+def unread_count(con, table, id_col, id_val, username, cutoff):
+    """Generic unread message counter."""
+    return con.execute(
+        f"SELECT COUNT(*) FROM {table} WHERE {id_col}=? AND sender!=? AND timestamp>?",
+        (id_val, username, cutoff)).fetchone()[0]
+
+def dec_messages(rows):
+    """Decrypt a list of (sender, content_enc, timestamp) rows."""
+    return [{"sender": r[0], "content": dec(r[1]), "timestamp": r[2]} for r in rows]
+
 @app.before_request
 def track_visit():
     if request.path.startswith(("/api", "/static")): return
-    now = datetime.datetime.utcnow().isoformat()
+    now = utc_now()
     with db() as con:
         con.execute("INSERT OR IGNORE INTO visits(date,ip) VALUES(?,?)", (datetime.date.today().isoformat(), get_ip()))
         u = session.get("username")
@@ -1365,7 +1395,7 @@ def logout():
 
 @app.route("/api/theme", methods=["POST"])
 def api_theme():
-    if not logged_in(): return err("NOT LOGGED IN")
+    if e := require_login(): return e
     t = request.json.get("theme", "green")
     if t not in THEMES: return err("INVALID THEME")
     with db() as con: con.execute("UPDATE users SET theme=? WHERE username=?", (t, me()))
@@ -1373,7 +1403,7 @@ def api_theme():
 
 @app.route("/api/change-password", methods=["POST"])
 def api_change_password():
-    if not logged_in(): return err("NOT LOGGED IN")
+    if e := require_login(): return e
     d = request.json
     cur_pw, new_pw = d.get("current",""), d.get("new_password","")
     if not cur_pw or not new_pw: return err("FIELDS REQUIRED")
@@ -1396,7 +1426,7 @@ def api_user_search():
 
 @app.route("/api/posts")
 def api_posts():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     u = me()
     with db() as con:
         rows   = con.execute("SELECT id,username,content,created_at FROM posts ORDER BY created_at DESC LIMIT 50").fetchall()
@@ -1412,9 +1442,9 @@ def api_posts():
 
 @app.route("/api/posts/create", methods=["POST"])
 def api_posts_create():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     content = (request.json or {}).get("content","").strip()
-    if not content:       return err("EMPTY POST")
+    if not content:        return err("EMPTY POST")
     if len(content) > 500: return err("TOO LONG")
     with db() as con:
         con.execute("INSERT INTO posts(username,content) VALUES(?,?)", (me(), content))
@@ -1422,7 +1452,7 @@ def api_posts_create():
 
 @app.route("/api/posts/react", methods=["POST"])
 def api_posts_react():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     d = request.json or {}
     post_id, emoji = d.get("post_id"), d.get("emoji","")
     if not post_id or emoji not in VALID_EMOJIS: return err("INVALID")
@@ -1438,7 +1468,7 @@ def api_posts_react():
 
 @app.route("/api/posts/delete", methods=["POST"])
 def api_posts_delete():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     post_id = (request.json or {}).get("post_id")
     u = me()
     with db() as con:
@@ -1453,14 +1483,14 @@ def api_posts_delete():
 
 @app.route("/api/admin/users")
 def api_admin_users():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     with db() as con:
         rows = con.execute("SELECT username,is_admin,created_at FROM users ORDER BY is_admin DESC,created_at ASC").fetchall()
     return ok(users=[{"username": r[0], "is_admin": bool(r[1]), "created_at": r[2]} for r in rows])
 
 @app.route("/api/admin/set-admin", methods=["POST"])
 def api_admin_set():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     d = request.json
     target, grant = d.get("username",""), d.get("grant", False)
     if target == ADMIN_USER: return err("CANNOT MODIFY ROOT ADMIN")
@@ -1469,7 +1499,7 @@ def api_admin_set():
 
 @app.route("/api/admin/remove-user", methods=["POST"])
 def api_admin_remove_user():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     target = request.json.get("username","")
     if target == ADMIN_USER: return err("CANNOT REMOVE ROOT ADMIN")
     with db() as con:
@@ -1483,20 +1513,20 @@ def api_admin_remove_user():
 
 @app.route("/api/admin/dm-log")
 def api_admin_dm_log():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     with db() as con:
         rows = con.execute("SELECT id,sender,recipient,content_enc,timestamp FROM messages ORDER BY timestamp DESC LIMIT 200").fetchall()
     return ok(messages=[{"id": r[0], "sender": r[1], "recipient": r[2], "content": dec(r[3]), "timestamp": r[4]} for r in rows])
 
 @app.route("/api/admin/delete-dm", methods=["POST"])
 def api_admin_delete_dm():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     with db() as con: con.execute("DELETE FROM messages WHERE id=?", (request.json.get("id"),))
     return ok()
 
 @app.route("/api/admin/group-log")
 def api_admin_group_log():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     with db() as con:
         rows = con.execute(
             "SELECT gm.id,g.id,g.name,gm.sender,gm.content_enc,gm.timestamp "
@@ -1506,7 +1536,7 @@ def api_admin_group_log():
 
 @app.route("/api/admin/user-chat")
 def api_admin_user_chat():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     username = request.args.get("username","").strip()
     if not username: return err("USERNAME REQUIRED")
     with db() as con:
@@ -1523,7 +1553,7 @@ def api_admin_user_chat():
 
 @app.route("/api/admin/delete-convo", methods=["POST"])
 def api_admin_delete_convo():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     u1, u2 = request.json.get("user1",""), request.json.get("user2","")
     if not u1 or not u2: return err("MISSING USERS")
     with db() as con:
@@ -1532,7 +1562,7 @@ def api_admin_delete_convo():
 
 @app.route("/api/admin/delete-channel", methods=["POST"])
 def api_admin_delete_channel():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     gid = request.json.get("group_id")
     if not gid: return err("MISSING GROUP ID")
     with db() as con:
@@ -1544,20 +1574,20 @@ def api_admin_delete_channel():
 
 @app.route("/api/admin/delete-group-msg", methods=["POST"])
 def api_admin_delete_group_msg():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     with db() as con: con.execute("DELETE FROM group_messages WHERE id=?", (request.json.get("id"),))
     return ok()
 
 @app.route("/api/admin/lock-channel", methods=["POST"])
 def api_admin_lock_channel():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     d = request.json
     with db() as con: con.execute("UPDATE groups SET locked=? WHERE id=?", (1 if d.get("lock") else 0, d.get("group_id")))
     return ok()
 
 @app.route("/api/admin/traffic")
 def api_admin_traffic():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     with db() as con:
         rows  = con.execute("SELECT date,COUNT(*) FROM visits GROUP BY date ORDER BY date DESC LIMIT 30").fetchall()
         total = con.execute("SELECT COUNT(DISTINCT ip) FROM visits").fetchone()[0]
@@ -1566,7 +1596,7 @@ def api_admin_traffic():
 
 @app.route("/api/admin/reset-requests")
 def api_admin_reset_requests():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     with db() as con:
         rows = con.execute(
             "SELECT id,username,temp_password,status,requested_at FROM password_resets "
@@ -1575,7 +1605,7 @@ def api_admin_reset_requests():
 
 @app.route("/api/admin/reset-approve", methods=["POST"])
 def api_admin_reset_approve():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     d = request.json or {}
     rid, temp_pw = d.get("id"), d.get("temp_password","").strip()
     if not rid or not temp_pw: return err("MISSING FIELDS")
@@ -1589,7 +1619,7 @@ def api_admin_reset_approve():
 
 @app.route("/api/admin/reset-deny", methods=["POST"])
 def api_admin_reset_deny():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     rid = (request.json or {}).get("id")
     if not rid: return err("MISSING ID")
     with db() as con: con.execute("UPDATE password_resets SET status='denied' WHERE id=?", (rid,))
@@ -1599,8 +1629,8 @@ def api_admin_reset_deny():
 
 @app.route("/api/traffic/public")
 def api_traffic_public():
-    ip, now = get_ip(), datetime.datetime.utcnow().isoformat()
-    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(minutes=2)).isoformat()
+    ip, now = get_ip(), utc_now()
+    cutoff = utc_cutoff(2)
     u = session.get("username")
     with db() as con:
         con.execute("INSERT OR IGNORE INTO visits(date,ip) VALUES(?,?)", (datetime.date.today().isoformat(), ip))
@@ -1617,7 +1647,7 @@ def api_traffic_public():
 @app.route("/api/online")
 def api_online():
     if not logged_in(): return ok(online=[])
-    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(minutes=2)).isoformat()
+    cutoff = utc_cutoff(2)
     with db() as con:
         rows = con.execute("SELECT username FROM user_sessions WHERE last_seen >= ?", (cutoff,)).fetchall()
     return ok(online=[r[0] for r in rows])
@@ -1626,7 +1656,7 @@ def api_online():
 
 @app.route("/api/news")
 def api_news():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     import random
     feed_type = request.args.get("type", "world")
     FEEDS = {
@@ -1699,17 +1729,15 @@ def api_dm_conversations():
     if not logged_in(): return jsonify({"ok": False})
     u = me()
     with db() as con:
-        read_at = {r[0]: r[1] for r in con.execute(
-            "SELECT chat_id,read_at FROM chat_read_at WHERE username=? AND chat_type='dm'", (u,)).fetchall()}
+        read_at = read_at_map(con, u, 'dm')
         partners = con.execute(
             "SELECT CASE WHEN sender=? THEN recipient ELSE sender END as partner, MAX(timestamp) "
             "FROM messages WHERE sender=? OR recipient=? GROUP BY partner ORDER BY 2 DESC", (u, u, u)).fetchall()
         convos = []
         for (partner, _) in partners:
-            cutoff = read_at.get(partner, '1970-01-01')
-            unread = con.execute("SELECT COUNT(*) FROM messages WHERE sender=? AND recipient=? AND timestamp>?",
-                                 (partner, u, cutoff)).fetchone()[0]
-            convos.append({"username": partner, "unread": unread})
+            cnt = con.execute("SELECT COUNT(*) FROM messages WHERE sender=? AND recipient=? AND timestamp>?",
+                              (partner, u, read_at.get(partner, '1970-01-01'))).fetchone()[0]
+            convos.append({"username": partner, "unread": cnt})
     return ok(conversations=convos)
 
 @app.route("/api/dm/thread")
@@ -1723,11 +1751,11 @@ def api_dm_thread():
             "WHERE (sender=? AND recipient=?) OR (sender=? AND recipient=?) "
             "ORDER BY timestamp ASC LIMIT 100", (u, other, other, u)).fetchall()
         con.execute("UPDATE messages SET read=1 WHERE recipient=? AND sender=?", (u, other))
-    return ok(me=u, messages=[{"sender": r[0], "content": dec(r[1]), "timestamp": r[2]} for r in rows])
+    return ok(me=u, messages=dec_messages(rows))
 
 @app.route("/api/dm/send", methods=["POST"])
 def api_dm_send():
-    if not logged_in(): return err("NOT LOGGED IN")
+    if e := require_login(): return e
     d = request.json
     to, content = d.get("to","").strip(), d.get("content","").strip()
     if not to or not content: return err("FIELDS REQUIRED")
@@ -1741,7 +1769,7 @@ def api_dm_send():
 
 @app.route("/api/dm/delete", methods=["POST"])
 def api_dm_delete():
-    if not logged_in(): return err("NOT LOGGED IN")
+    if e := require_login(): return e
     other = (request.json or {}).get("username","").strip()
     if not other: return err("MISSING USERNAME")
     u = me()
@@ -1751,7 +1779,7 @@ def api_dm_delete():
 
 @app.route("/api/dm/block", methods=["POST"])
 def api_dm_block():
-    if not logged_in(): return err("NOT LOGGED IN")
+    if e := require_login(): return e
     other = (request.json or {}).get("username","").strip()
     if not other: return err("MISSING USERNAME")
     u = me()
@@ -1762,7 +1790,7 @@ def api_dm_block():
 
 @app.route("/api/dm/unblock", methods=["POST"])
 def api_dm_unblock():
-    if not logged_in(): return err("NOT LOGGED IN")
+    if e := require_login(): return e
     other = (request.json or {}).get("username","").strip()
     with db() as con: con.execute("DELETE FROM dm_blocked WHERE blocker=? AND blocked=?", (me(), other))
     return ok()
@@ -1777,17 +1805,14 @@ def api_groups():
         rows    = con.execute("SELECT id,name,locked FROM groups ORDER BY id ASC").fetchall()
         members = {r[0] for r in con.execute("SELECT group_id FROM group_members WHERE username=?", (u,)).fetchall()}
         banned  = {r[0] for r in con.execute("SELECT group_id FROM group_banned WHERE username=?", (u,)).fetchall()}
-        read_at = {r[0]: r[1] for r in con.execute("SELECT chat_id,read_at FROM chat_read_at WHERE username=? AND chat_type='group'", (u,)).fetchall()}
-        unread  = {}
-        for r in rows:
-            cutoff = read_at.get(str(r[0]), '1970-01-01')
-            unread[r[0]] = con.execute("SELECT COUNT(*) FROM group_messages WHERE group_id=? AND sender!=? AND timestamp>?", (r[0], u, cutoff)).fetchone()[0]
+        rat     = read_at_map(con, u, 'group')
+        unread  = {r[0]: unread_count(con, 'group_messages', 'group_id', r[0], u, rat.get(str(r[0]), '1970-01-01')) for r in rows}
     return ok(groups=[{"id": r[0], "name": r[1], "member": r[0] in members, "locked": bool(r[2]),
                        "banned": r[0] in banned, "unread": unread.get(r[0], 0)} for r in rows])
 
 @app.route("/api/groups/create", methods=["POST"])
 def api_group_create():
-    if not logged_in(): return err("NOT LOGGED IN")
+    if e := require_login(): return e
     name = request.json.get("name","").strip().upper()
     if not name or len(name) < 2: return err("NAME TOO SHORT")
     try:
@@ -1816,11 +1841,11 @@ def api_group_messages(gid):
         members_list = [r[0] for r in con.execute("SELECT username FROM group_members WHERE group_id=? ORDER BY username", (gid,)).fetchall()] if admin else []
     is_member = admin or (bool(member) and not bool(banned))
     return ok(me=u, member=is_member, locked=bool(group and group[0]), admin=admin, members=members_list,
-              messages=[{"sender": r[0], "content": dec(r[1]), "timestamp": r[2]} for r in rows])
+              messages=dec_messages(rows))
 
 @app.route("/api/groups/send", methods=["POST"])
 def api_group_send():
-    if not logged_in(): return err("NOT LOGGED IN")
+    if e := require_login(): return e
     d = request.json
     gid, content = d.get("group_id"), d.get("content","").strip()
     if not content: return err("EMPTY MESSAGE")
@@ -1840,7 +1865,7 @@ def api_group_send():
 
 @app.route("/api/groups/kick", methods=["POST"])
 def api_group_kick():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     d = request.json; gid, target = d.get("group_id"), d.get("username","").strip()
     if not gid or not target: return err("MISSING FIELDS")
     with db() as con: con.execute("DELETE FROM group_members WHERE group_id=? AND username=?", (gid, target))
@@ -1848,7 +1873,7 @@ def api_group_kick():
 
 @app.route("/api/groups/ban", methods=["POST"])
 def api_group_ban():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     d = request.json; gid, target = d.get("group_id"), d.get("username","").strip()
     if not gid or not target: return err("MISSING FIELDS")
     with db() as con:
@@ -1858,7 +1883,7 @@ def api_group_ban():
 
 @app.route("/api/groups/unban", methods=["POST"])
 def api_group_unban():
-    if not is_admin(): return err("FORBIDDEN")
+    if e := require_admin(): return e
     d = request.json; gid, target = d.get("group_id"), d.get("username","").strip()
     with db() as con:
         con.execute("DELETE FROM group_banned WHERE group_id=? AND username=?", (gid, target))
@@ -1879,7 +1904,7 @@ def api_group_leave():
 
 @app.route("/api/group/rename", methods=["POST"])
 def api_group_rename():
-    if not is_admin(): return err("ADMIN ONLY")
+    if e := require_admin(): return e
     d = request.json or {}; gid, name = d.get("id"), d.get("name","").strip().upper()
     if not gid or not name: return err("MISSING FIELDS")
     try:
@@ -1891,21 +1916,18 @@ def api_group_rename():
 
 @app.route("/api/private/rooms")
 def api_private_rooms():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     u = me(); admin = is_admin(u)
     with db() as con:
         rows = con.execute("SELECT id,name FROM private_rooms ORDER BY name ASC").fetchall() if admin else \
                con.execute("SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=? ORDER BY r.name ASC", (u,)).fetchall()
-        read_at = {r[0]: r[1] for r in con.execute("SELECT chat_id,read_at FROM chat_read_at WHERE username=? AND chat_type='private'", (u,)).fetchall()}
-        unread  = {}
-        for r in rows:
-            cutoff = read_at.get(str(r[0]), '1970-01-01')
-            unread[r[0]] = con.execute("SELECT COUNT(*) FROM private_room_messages WHERE room_id=? AND sender!=? AND timestamp>?", (r[0], u, cutoff)).fetchone()[0]
+        rat    = read_at_map(con, u, 'private')
+        unread = {r[0]: unread_count(con, 'private_room_messages', 'room_id', r[0], u, rat.get(str(r[0]), '1970-01-01')) for r in rows}
     return ok(rooms=[{"id": r[0], "name": r[1], "unread": unread.get(r[0], 0)} for r in rows], is_admin=admin)
 
 @app.route("/api/private/create", methods=["POST"])
 def api_private_create():
-    if not is_admin(): return err("ADMIN ONLY")
+    if e := require_admin(): return e
     name = (request.json or {}).get("name","").strip().upper()
     if not name: return err("NAME REQUIRED")
     with db() as con:
@@ -1917,17 +1939,17 @@ def api_private_create():
 
 @app.route("/api/private/<int:rid>/messages")
 def api_private_messages(rid):
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     u = me(); admin = is_admin(u)
     with db() as con:
         if not admin and not con.execute("SELECT 1 FROM private_room_members WHERE room_id=? AND username=?", (rid, u)).fetchone():
             return err("ACCESS DENIED")
         rows = con.execute("SELECT sender,content_enc,timestamp FROM private_room_messages WHERE room_id=? ORDER BY timestamp ASC LIMIT 100", (rid,)).fetchall()
-    return ok(me=u, is_admin=admin, messages=[{"sender": r[0], "content": dec(r[1]), "timestamp": r[2]} for r in rows])
+    return ok(me=u, is_admin=admin, messages=dec_messages(rows))
 
 @app.route("/api/private/send", methods=["POST"])
 def api_private_send():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     d = request.json or {}; rid, content = d.get("room_id"), d.get("content","").strip()
     if not rid or not content: return err("MISSING FIELDS")
     u = me()
@@ -1944,14 +1966,14 @@ def api_private_send():
 
 @app.route("/api/private/<int:rid>/members")
 def api_private_members(rid):
-    if not is_admin(): return err("ADMIN ONLY")
+    if e := require_admin(): return e
     with db() as con:
         rows = con.execute("SELECT username FROM private_room_members WHERE room_id=? ORDER BY username", (rid,)).fetchall()
     return ok(members=[r[0] for r in rows])
 
 @app.route("/api/private/add-member", methods=["POST"])
 def api_private_add_member():
-    if not is_admin(): return err("ADMIN ONLY")
+    if e := require_admin(): return e
     d = request.json or {}; rid, username = d.get("room_id"), d.get("username","").strip()
     if not rid or not username: return err("MISSING FIELDS")
     with db() as con:
@@ -1961,7 +1983,7 @@ def api_private_add_member():
 
 @app.route("/api/private/remove-member", methods=["POST"])
 def api_private_remove_member():
-    if not is_admin(): return err("ADMIN ONLY")
+    if e := require_admin(): return e
     d = request.json or {}; rid, username = d.get("room_id"), d.get("username","").strip()
     if not rid or not username: return err("MISSING FIELDS")
     with db() as con: con.execute("DELETE FROM private_room_members WHERE room_id=? AND username=?", (rid, username))
@@ -1969,7 +1991,7 @@ def api_private_remove_member():
 
 @app.route("/api/private/rename", methods=["POST"])
 def api_private_rename():
-    if not is_admin(): return err("ADMIN ONLY")
+    if e := require_admin(): return e
     d = request.json or {}; rid, name = d.get("id"), d.get("name","").strip().upper()
     if not rid or not name: return err("MISSING FIELDS")
     with db() as con: con.execute("UPDATE private_rooms SET name=? WHERE id=?", (name, rid))
@@ -1979,35 +2001,37 @@ def api_private_rename():
 
 @app.route("/api/notifications")
 def api_notifications():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     u = me()
     with db() as con:
-        read_dm_at = {r[0]: r[1] for r in con.execute("SELECT chat_id,read_at FROM chat_read_at WHERE username=? AND chat_type='dm'", (u,)).fetchall()}
+        # DMs
+        read_dm_at = read_at_map(con, u, 'dm')
         dm_unread = sum(
             con.execute("SELECT COUNT(*) FROM messages WHERE sender=? AND recipient=? AND timestamp>?",
                         (sender, u, read_dm_at.get(sender, '1970-01-01'))).fetchone()[0]
             for (sender,) in con.execute("SELECT DISTINCT sender FROM messages WHERE recipient=?", (u,)).fetchall()
         )
+        # Groups
         group_rows  = con.execute("SELECT id,name FROM groups WHERE id IN (SELECT group_id FROM group_members WHERE username=?) ORDER BY id", (u,)).fetchall()
-        read_grp_at = {r[0]: r[1] for r in con.execute("SELECT chat_id,read_at FROM chat_read_at WHERE username=? AND chat_type='group'", (u,)).fetchall()}
-        groups_unread = {}
-        for gid, gname in group_rows:
-            cnt = con.execute("SELECT COUNT(*) FROM group_messages WHERE group_id=? AND sender!=? AND timestamp>?",
-                              (gid, u, read_grp_at.get(str(gid), '1970-01-01'))).fetchone()[0]
-            if cnt: groups_unread[str(gid)] = {"name": gname, "count": cnt}
-
-        priv_rows   = con.execute("SELECT id,name FROM private_rooms ORDER BY id", ).fetchall() if is_admin(u) else \
+        read_grp_at = read_at_map(con, u, 'group')
+        groups_unread = {
+            str(gid): {"name": gname, "count": cnt}
+            for gid, gname in group_rows
+            if (cnt := unread_count(con, 'group_messages', 'group_id', gid, u, read_grp_at.get(str(gid), '1970-01-01')))
+        }
+        # Private rooms
+        priv_rows   = con.execute("SELECT id,name FROM private_rooms ORDER BY id").fetchall() if is_admin(u) else \
                       con.execute("SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=? ORDER BY r.id", (u,)).fetchall()
-        read_prv_at = {r[0]: r[1] for r in con.execute("SELECT chat_id,read_at FROM chat_read_at WHERE username=? AND chat_type='private'", (u,)).fetchall()}
-        privrooms_unread = {}
-        for rid, rname in priv_rows:
-            cnt = con.execute("SELECT COUNT(*) FROM private_room_messages WHERE room_id=? AND sender!=? AND timestamp>?",
-                              (rid, u, read_prv_at.get(str(rid), '1970-01-01'))).fetchone()[0]
-            if cnt: privrooms_unread[str(rid)] = {"name": rname, "count": cnt}
-
-        posts_read  = con.execute("SELECT read_at FROM chat_read_at WHERE username=? AND chat_type='posts' AND chat_id='posts'", (u,)).fetchone()
-        new_posts   = con.execute("SELECT COUNT(*) FROM posts WHERE username!=? AND created_at>?",
-                                  (u, posts_read[0] if posts_read else '1970-01-01')).fetchone()[0]
+        read_prv_at = read_at_map(con, u, 'private')
+        privrooms_unread = {
+            str(rid): {"name": rname, "count": cnt}
+            for rid, rname in priv_rows
+            if (cnt := unread_count(con, 'private_room_messages', 'room_id', rid, u, read_prv_at.get(str(rid), '1970-01-01')))
+        }
+        # Posts
+        posts_read = con.execute("SELECT read_at FROM chat_read_at WHERE username=? AND chat_type='posts' AND chat_id='posts'", (u,)).fetchone()
+        new_posts  = con.execute("SELECT COUNT(*) FROM posts WHERE username!=? AND created_at>?",
+                                 (u, posts_read[0] if posts_read else '1970-01-01')).fetchone()[0]
 
     group_total = sum(v["count"] for v in groups_unread.values())
     priv_total  = sum(v["count"] for v in privrooms_unread.values())
@@ -2017,7 +2041,7 @@ def api_notifications():
 
 @app.route("/api/mark-read", methods=["POST"])
 def api_mark_read():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     d = request.json or {}
     chat_type, chat_id = d.get("type",""), str(d.get("id",""))
     if not chat_type or not chat_id: return err("MISSING FIELDS")
@@ -2049,7 +2073,7 @@ def api_vapid_public_key():
 
 @app.route("/api/push/subscribe", methods=["POST"])
 def api_push_subscribe():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     d = request.json or {}
     endpoint = d.get("endpoint",""); p256dh = d.get("keys",{}).get("p256dh",""); auth = d.get("keys",{}).get("auth","")
     if not endpoint or not p256dh or not auth: return err("MISSING FIELDS")
@@ -2060,7 +2084,7 @@ def api_push_subscribe():
 
 @app.route("/api/push/unsubscribe", methods=["POST"])
 def api_push_unsubscribe():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     endpoint = (request.json or {}).get("endpoint","")
     if endpoint:
         with db() as con: con.execute("DELETE FROM push_subscriptions WHERE username=? AND endpoint=?", (me(), endpoint))
@@ -2070,7 +2094,7 @@ def api_push_unsubscribe():
 
 @app.route("/api/ask", methods=["POST"])
 def api_ask():
-    if not logged_in(): return err("LOGIN REQUIRED")
+    if e := require_login(): return e
     query = (request.json or {}).get("query","").strip()
     if not query: return err("EMPTY QUERY")
     api_key = os.environ.get("GEMINI_API_KEY","")
@@ -2109,7 +2133,7 @@ self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil
     return Response(sw, mimetype="application/javascript")
 
 def _svg_icon(size, text_y, font_size, sub_y=None, sub_text=None):
-    txt = f'<text x="{size//2}" y="{text_y}" text-anchor="middle" font-family="monospace" font-weight="900" font-size="{font_size}" fill="#00ff00" letter-spacing="2">{sub_text and "VOX" or "VOX"}</text>'
+    txt = f'<text x="{size//2}" y="{text_y}" text-anchor="middle" font-family="monospace" font-weight="900" font-size="{font_size}" fill="#00ff00" letter-spacing="2">VOX</text>'
     sub = f'<text x="{size//2}" y="{sub_y}" text-anchor="middle" font-family="monospace" font-size="{font_size//4}" fill="#00ff00" opacity="0.6" letter-spacing="6">{sub_text}</text>' if sub_text else ''
     r = size // 2; cr = int(r * 0.85)
     svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}"><rect width="{size}" height="{size}" fill="#000"/><circle cx="{r}" cy="{r}" r="{cr}" fill="none" stroke="#00ff00" stroke-width="{max(4,size//48)}"/>{txt}{sub}</svg>'.encode()
