@@ -726,10 +726,10 @@ async function adminDenyReset(id){{
 }}
 
 // ── NEWS ──────────────────────────────────────────────────────────────────
-let activeNewsTab='offgrid';
+let activeNewsTab='world';
 function switchNewsTab(tab){{
   activeNewsTab=tab;
-  [['newsTabOG','offgrid'],['newsTabWorld','world'],['newsTabUS','usnews'],['newsTabEpstein','epstein']].forEach(([id,t])=>{{
+  [['newsTabWorld','world'],['newsTabUS','usnews'],['newsTabEpstein','epstein']].forEach(([id,t])=>{{
     const el=$(id);if(!el)return;
     el.style.background=tab===t?'var(--p)':'var(--p10)';
     el.style.color=tab===t?'#000':'var(--p)';
@@ -1303,8 +1303,7 @@ def home():
             <span id="newsFeedStatus" style="font-size:9px;opacity:.4;letter-spacing:1px;">LOADING...</span>
         </div>
         <div style="display:flex;border-left:2px solid var(--p);border-right:2px solid var(--p);">
-            <button id="newsTabOG"      onclick="switchNewsTab('offgrid')" style="flex:1;padding:6px 2px;background:var(--p);color:#000;border:none;border-bottom:2px solid var(--p);font-family:'Courier New',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127807; OFF-GRID</button>
-            <button id="newsTabWorld"   onclick="switchNewsTab('world')"   style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:'Courier New',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127760; WORLD</button>
+            <button id="newsTabWorld"   onclick="switchNewsTab('world')"   style="flex:1;padding:6px 2px;background:var(--p);color:#000;border:none;border-bottom:2px solid var(--p);font-family:'Courier New',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127760; WORLD</button>
             <button id="newsTabUS"      onclick="switchNewsTab('usnews')"  style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:'Courier New',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127482;&#127480; US NEWS</button>
             <button id="newsTabEpstein" onclick="switchNewsTab('epstein')" style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:'Courier New',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#128269; EPSTEIN</button>
         </div>
@@ -1629,7 +1628,7 @@ def api_online():
 def api_news():
     if not logged_in(): return err("LOGIN REQUIRED")
     import random
-    feed_type = request.args.get("type", "offgrid")
+    feed_type = request.args.get("type", "world")
     FEEDS = {
         "world":   [
             ("https://news.google.com/rss/headlines/section/topic/WORLD",      "WORLD"),
@@ -1655,16 +1654,8 @@ def api_news():
             ("https://news.google.com/rss/search?q=epstein+island+investigation",     "INVESTIGATION"),
             ("https://news.google.com/rss/search?q=epstein+jeffrey+news+2024",        "LATEST"),
         ],
-        "offgrid": [
-            ("https://news.google.com/rss/search?q=off+grid+living",                  "OFF-GRID"),
-            ("https://news.google.com/rss/search?q=homesteading",                     "HOMESTEAD"),
-            ("https://news.google.com/rss/search?q=survival+prepping",                "SURVIVAL"),
-            ("https://news.google.com/rss/search?q=self+sufficiency+farming",         "FARMING"),
-            ("https://news.google.com/rss/search?q=emergency+preparedness",           "PREP"),
-            ("https://news.google.com/rss/search?q=barter+local+economy",             "BARTER"),
-        ],
     }
-    feeds = FEEDS.get(feed_type, FEEDS["offgrid"])
+    feeds = FEEDS.get(feed_type, FEEDS["world"])
     UAS = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
