@@ -292,7 +292,7 @@ def shell(content, user=None, theme="green", unread=0):
     if user:
         ub = f'<span class="unread-badge">{unread}</span>' if unread else '<span class="unread-badge" style="background:transparent;border:1.5px solid var(--p);color:var(--p);opacity:.6;">0</span>'
         at = f' <span class="admin-badge">&#9733; ADMIN</span>' if admin else ''
-        ai = '<a class="dropdown-item" data-action="admin"><i class="fas fa-star"></i> ADMIN PANEL</a>' if admin else ''
+        ai = ''
         menu_html = f'''<div class="menu-wrap">
             <div class="menu-trigger" onclick="event.stopPropagation();document.getElementById('accountMenu').classList.toggle('open')" style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:8px;">
               <span style="font-size:16px;">&#9776;</span>
@@ -305,7 +305,7 @@ def shell(content, user=None, theme="green", unread=0):
                 <div class="dropdown-divider"></div>
                 <a class="dropdown-item" data-action="settings"><i class="fas fa-cog"></i> SETTINGS</a>
                 <a class="dropdown-item" onclick="enableNotifications()" id="notifMenuItem"><i class="fas fa-bell"></i> ENABLE NOTIFICATIONS</a>
-                {ai}<a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a>
+                <a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a>
             </div></div>'''
         grid_style = 'grid-template-columns:auto 1fr auto'
         right_btns = '<button class="hero-btn" onclick="openModal(\'postModal\');loadPosts();markPostsRead();" style="font-size:11px;padding:7px 14px;letter-spacing:1px;">&#9998; POST <span id="badgePosts" style="display:none;background:#000;color:var(--p);border:1px solid var(--p);border-radius:50%;padding:1px 5px;font-size:9px;margin-left:3px;"></span></button>'
