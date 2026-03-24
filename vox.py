@@ -3,41 +3,32 @@ from flask import Flask, request, session, redirect, jsonify, Response
 import sqlite3, os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
 from contextlib import contextmanager
 from cryptography.fernet import Fernet
-
 _BASE = pathlib.Path(__file__).parent.resolve()
 app = Flask(__name__)
-
 _SK_FILE = str(_BASE / "secret_key.txt")
 if not os.path.exists(_SK_FILE):
     open(_SK_FILE, "w").write("1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38")
 app.secret_key = open(_SK_FILE).read().strip() or "1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38"
 app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(days=90)
 app.config['SESSION_PERMANENT'] = True
-
 DB         = str(_BASE / "ogl.db")
 ADMIN_USER = "Eagleone"
 _KEY_FILE  = str(_BASE / "secret.key")
-
 if not os.path.exists(_KEY_FILE):
     open(_KEY_FILE, "wb").write(Fernet.generate_key())
 fernet = Fernet(open(_KEY_FILE, "rb").read())
-
 VAPID_PUBLIC_KEY  = os.environ.get("VAPID_PUBLIC_KEY",  "BAyH6Y_hbhzzmRgt3pd5Qa7guYKYKfsVCVIZsJGF0zYPfBupcKm24bduVIj4585JSjeeu3aeR19d4tBzlHgQIdU")
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOqLakrDhZhnH_KBh5nwx2l0jyGfOWplqyE82s4Ryws2hRANCAAQMh-mP4W4c85kYLd6XeUGu4LmCmCn7FQlSGbCRhdM2D3wbqXCptuG3blSI-OfOSUo3nrt2nkdfXeLQc5R4ECHV")
 VAPID_CLAIMS      = {"sub": "mailto:admin@voxpopuli.app"}
-
 hash_pw = lambda pw: hashlib.sha256(pw.encode()).hexdigest()
 enc     = lambda t: fernet.encrypt(t.encode()).decode()
 dec     = lambda t: fernet.decrypt(t.encode()).decode() if t else ""
-
 get_ip    = lambda: request.headers.get("X-Forwarded-For", request.remote_addr).split(",")[0].strip()
 logged_in = lambda: "username" in session
 me        = lambda: session.get("username", "")
 ok        = lambda **kw: jsonify({"ok": True, **kw})
 err       = lambda e: jsonify({"ok": False, "error": e})
-
 VALID_EMOJIS = {"like", "dislike", "love", "lol", "wow", "angry", "fire"}
-
 THEMES = {
     "green":  {"p": "#00ff00", "bg": "#000",    "ac": "#003300", "name": "MATRIX"},
     "cyan":   {"p": "#00ffff", "bg": "#000a0a",  "ac": "#003333", "name": "OCEAN"},
@@ -46,7 +37,6 @@ THEMES = {
     "purple": {"p": "#cc44ff", "bg": "#050010",  "ac": "#220033", "name": "NEXUS"},
     "white":  {"p": "#ffffff", "bg": "#050505",  "ac": "#222222", "name": "GHOST"},
 }
-
 NAV_ITEMS = [
     ("fa-broadcast-tower", "COMMS",    "https://www.seeedstudio.com/XIAO-ESP32S3-for-Meshtastic-LoRa-with-3D-Printed-Enclosure-p-6314.html"),
     ("fa-shield-alt",      "SURVIVAL", "#"),
@@ -57,37 +47,15 @@ NAV_ITEMS = [
     ("fa-lightbulb",       "TIPS",     "#"),
     ("fa-hand-holding-heart", "DONATE","#"),
 ]
-
 # ── DB ────────────────────────────────────────────────────────────────────────
-
 @contextmanager
 def db():
     con = sqlite3.connect(DB)
     try: yield con
     finally: con.commit(); con.close()
-
 def init_db():
     with db() as con:
-        con.cursor().executescript("""
-        CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,theme TEXT DEFAULT 'green',is_admin INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,sender TEXT NOT NULL,recipient TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP,read INTEGER DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS groups(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE NOT NULL,created_by TEXT NOT NULL,locked INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS group_members(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username));
-        CREATE TABLE IF NOT EXISTS group_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,group_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS visits(id INTEGER PRIMARY KEY AUTOINCREMENT,date TEXT NOT NULL,ip TEXT NOT NULL,UNIQUE(date,ip));
-        CREATE TABLE IF NOT EXISTS active_users(ip TEXT PRIMARY KEY,last_seen TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS user_sessions(username TEXT PRIMARY KEY,last_seen TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS chat_read_at(username TEXT NOT NULL,chat_type TEXT NOT NULL,chat_id TEXT NOT NULL,read_at TEXT NOT NULL,PRIMARY KEY(username,chat_type,chat_id));
-        CREATE TABLE IF NOT EXISTS group_banned(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username));
-        CREATE TABLE IF NOT EXISTS dm_blocked(blocker TEXT NOT NULL,blocked TEXT NOT NULL,PRIMARY KEY(blocker,blocked));
-        CREATE TABLE IF NOT EXISTS posts(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,content TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS post_reactions(post_id INTEGER NOT NULL,username TEXT NOT NULL,emoji TEXT NOT NULL,PRIMARY KEY(post_id,username));
-        CREATE TABLE IF NOT EXISTS private_rooms(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS private_room_members(room_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(room_id,username));
-        CREATE TABLE IF NOT EXISTS private_room_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,room_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS push_subscriptions(username TEXT NOT NULL,endpoint TEXT NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,PRIMARY KEY(username,endpoint));
-        CREATE TABLE IF NOT EXISTS password_resets(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,temp_password TEXT,status TEXT DEFAULT 'pending',requested_at TEXT DEFAULT CURRENT_TIMESTAMP);
-        """)
+        con.cursor().executescript("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,theme TEXT DEFAULT 'green',is_admin INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,sender TEXT NOT NULL,recipient TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP,read INTEGER DEFAULT 0);CREATE TABLE IF NOT EXISTS groups(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE NOT NULL,created_by TEXT NOT NULL,locked INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS group_members(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username));CREATE TABLE IF NOT EXISTS group_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,group_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS visits(id INTEGER PRIMARY KEY AUTOINCREMENT,date TEXT NOT NULL,ip TEXT NOT NULL,UNIQUE(date,ip));CREATE TABLE IF NOT EXISTS active_users(ip TEXT PRIMARY KEY,last_seen TEXT NOT NULL);CREATE TABLE IF NOT EXISTS user_sessions(username TEXT PRIMARY KEY,last_seen TEXT NOT NULL);CREATE TABLE IF NOT EXISTS chat_read_at(username TEXT NOT NULL,chat_type TEXT NOT NULL,chat_id TEXT NOT NULL,read_at TEXT NOT NULL,PRIMARY KEY(username,chat_type,chat_id));CREATE TABLE IF NOT EXISTS group_banned(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username));CREATE TABLE IF NOT EXISTS dm_blocked(blocker TEXT NOT NULL,blocked TEXT NOT NULL,PRIMARY KEY(blocker,blocked));CREATE TABLE IF NOT EXISTS posts(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,content TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS post_reactions(post_id INTEGER NOT NULL,username TEXT NOT NULL,emoji TEXT NOT NULL,PRIMARY KEY(post_id,username));CREATE TABLE IF NOT EXISTS private_rooms(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS private_room_members(room_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(room_id,username));CREATE TABLE IF NOT EXISTS private_room_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,room_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS push_subscriptions(username TEXT NOT NULL,endpoint TEXT NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,PRIMARY KEY(username,endpoint));CREATE TABLE IF NOT EXISTS password_resets(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,temp_password TEXT,status TEXT DEFAULT 'pending',requested_at TEXT DEFAULT CURRENT_TIMESTAMP);")
         c = con.cursor()
         c.execute("UPDATE chat_read_at SET read_at = replace(substr(read_at,1,19),'T',' ') WHERE read_at LIKE '%T%'")
         c.execute("UPDATE users SET is_admin=1 WHERE username=?", (ADMIN_USER,))
@@ -100,11 +68,8 @@ def init_db():
             for uname in users:
                 if (gid, uname) not in banned:
                     c.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, uname))
-
 init_db()
-
 # ── HELPERS ───────────────────────────────────────────────────────────────────
-
 def is_admin(u=None):
     u = u or me()
     if not u: return False
@@ -112,15 +77,12 @@ def is_admin(u=None):
     with db() as con:
         r = con.execute("SELECT is_admin FROM users WHERE username=?", (u,)).fetchone()
     return bool(r and r[0])
-
 def require_login():
     """Returns an error response if not logged in, else None."""
     if not logged_in(): return err("NOT LOGGED IN")
-
 def require_admin():
     """Returns an error response if not admin, else None."""
     if not is_admin(): return err("FORBIDDEN")
-
 def send_push(username, title, body, tag="vox"):
     try:
         from pywebpush import webpush
@@ -139,29 +101,23 @@ def send_push(username, title, body, tag="vox"):
                     with db() as con: con.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (endpoint,))
     except Exception:
         pass
-
 def utc_now():
     return datetime.datetime.utcnow().isoformat()
-
 def utc_cutoff(minutes=2):
     return (datetime.datetime.utcnow() - datetime.timedelta(minutes=minutes)).isoformat()
-
 def read_at_map(con, username, chat_type):
     """Returns {chat_id: read_at} for a user/type."""
     return {r[0]: r[1] for r in con.execute(
         "SELECT chat_id,read_at FROM chat_read_at WHERE username=? AND chat_type=?",
         (username, chat_type)).fetchall()}
-
 def unread_count(con, table, id_col, id_val, username, cutoff):
     """Generic unread message counter."""
     return con.execute(
         f"SELECT COUNT(*) FROM {table} WHERE {id_col}=? AND sender!=? AND timestamp>?",
         (id_val, username, cutoff)).fetchone()[0]
-
 def dec_messages(rows):
     """Decrypt a list of (sender, content_enc, timestamp) rows."""
     return [{"sender": r[0], "content": dec(r[1]), "timestamp": r[2]} for r in rows]
-
 @app.before_request
 def track_visit():
     if request.path.startswith(("/api", "/static")): return
@@ -170,9 +126,7 @@ def track_visit():
         con.execute("INSERT OR IGNORE INTO visits(date,ip) VALUES(?,?)", (datetime.date.today().isoformat(), get_ip()))
         u = session.get("username")
         if u: con.execute("INSERT OR REPLACE INTO user_sessions(username,last_seen) VALUES(?,?)", (u, now))
-
 # ── CSS / HTML HELPERS ────────────────────────────────────────────────────────
-
 def theme_css(t):
     c = THEMES.get(t, THEMES["green"])
     p, bg, ac = c["p"], c["bg"], c["ac"]
@@ -304,224 +258,56 @@ body::after{{top:0;height:6px;background:var(--p);opacity:.18;filter:blur(1px);a
   .send-btn{{padding:11px 14px;font-size:12px}}.mobile-back-btn{{display:flex!important}}
 }}
 @media(min-width:701px){{.mobile-back-btn{{display:none!important}}.comms-sidebar,.comms-main{{display:flex}}}}"""
-
 def pw_field(fid, ph, ac="current-password"):
     return f'<div class="field-wrap"><input class="field" id="{fid}" placeholder="{ph}" type="password" autocomplete="{ac}"><button class="eye-btn" type="button" onclick="togglePw(\'{fid}\',this)">&#128065;</button></div>'
-
 def theme_btns(fn):
-    return "".join(
-        f'<button class="theme-btn" style="color:{c};border-color:{c};" onclick="{fn}(\'{k}\')">&#9679; {k.upper()}</button>'
-        for k, c in [("green","#0f0"),("cyan","#0ff"),("amber","#fb0"),("red","#f22"),("purple","#c4f"),("white","#fff")]
-    )
-
+    return "".join(f'<button class="theme-btn" style="color:{c};border-color:{c};" onclick="{fn}(\'{k}\')">&#9679; {k.upper()}</button>' for k,c in [("green","#0f0"),("cyan","#0ff"),("amber","#fb0"),("red","#f22"),("purple","#c4f"),("white","#fff")])
+def cyber_box(title, body, *, title_right="", extra_header="", footer="", radius="var(--r)", mb="24px", max_h=None, border_top=True, body_style=""):
+    mh = f"max-height:{max_h};overflow-y:auto;" if max_h else ""
+    return (f'<div class="command-wrapper" style="width:100%;margin-bottom:{mb};box-sizing:border-box;">'
+        f'<div style="padding:10px 14px;border:2px solid var(--p);border-radius:{radius} {radius} 0 0;background:var(--p10);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">'
+        f'<span style="font-size:13px;letter-spacing:2px;">{title}</span>{title_right}</div>'
+        f'{extra_header}'
+        f'<div style="border:2px solid var(--p);border-top:none;border-radius:0 0 {radius} {radius};{mh}{body_style}">{body}</div>'
+        f'{footer}</div>')
 # ── SHELL ─────────────────────────────────────────────────────────────────────
-
 def shell(content, user=None, theme="green", unread=0):
     t     = THEMES.get(theme, THEMES["green"])
     admin = is_admin(user)
-
     if user:
         at_badge = ' <span style="font-size:9px;opacity:.8;margin-left:5px;letter-spacing:1px;vertical-align:middle;">&#9733; ADMIN</span>' if admin else ''
-        menu_html = f'''<div class="menu-wrap">
-            <div class="menu-trigger" onclick="event.stopPropagation();document.getElementById('accountMenu').classList.toggle('open')" style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:8px;">
-              <span style="font-size:16px;">&#9776;</span>
-              <span style="border-left:1px solid var(--p);opacity:.4;height:16px;"></span>
-              <span style="font-size:12px;letter-spacing:1px;">{user}</span>{at_badge}
-              <span style="font-size:10px;opacity:.6;">&#9663;</span>
-            </div>
-            <div class="dropdown-menu" id="accountMenu">
-                <div class="dropdown-item" style="opacity:.5;font-size:10px;cursor:default;pointer-events:none;padding:8px 16px;">&#9658; {user.upper()} [{t['name']}]</div>
-                <div class="dropdown-divider"></div>
-                <a class="dropdown-item" data-action="settings"><i class="fas fa-cog"></i> SETTINGS</a>
-                <a class="dropdown-item" onclick="enableNotifications()" id="notifMenuItem"><i class="fas fa-bell"></i> ENABLE NOTIFICATIONS</a>
-                <a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a>
-            </div></div>'''
+        menu_html = f'<div class="menu-wrap"><div class="menu-trigger" onclick="event.stopPropagation();document.getElementById(\'accountMenu\').classList.toggle(\'open\')" style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:8px;"><span style="font-size:16px;">&#9776;</span><span style="border-left:1px solid var(--p);opacity:.4;height:16px;"></span><span style="font-size:12px;letter-spacing:1px;">{user}</span>{at_badge}<span style="font-size:10px;opacity:.6;">&#9663;</span></div><div class="dropdown-menu" id="accountMenu"><div class="dropdown-item" style="opacity:.5;font-size:10px;cursor:default;pointer-events:none;padding:8px 16px;">&#9658; {user.upper()} [{t["name"]}]</div><div class="dropdown-divider"></div><a class="dropdown-item" data-action="settings"><i class="fas fa-cog"></i> SETTINGS</a><a class="dropdown-item" onclick="enableNotifications()" id="notifMenuItem"><i class="fas fa-bell"></i> ENABLE NOTIFICATIONS</a><a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a></div></div>'
         grid_style = 'grid-template-columns:auto 1fr auto'
         right_btns = '<button class="hero-btn" onclick="openModal(\'postModal\');loadPosts();markPostsRead();" style="font-size:11px;padding:7px 14px;letter-spacing:1px;">&#9998; POST <span id="badgePosts" style="display:none;background:#000;color:var(--p);border:1px solid var(--p);border-radius:50%;padding:1px 5px;font-size:9px;margin-left:3px;"></span></button>'
     else:
         menu_html  = ''
         right_btns = '<button class="hero-btn" data-action="login">&#9658; LOGIN</button><button class="hero-btn" data-action="register">&#9658; JOIN</button>'
         grid_style = 'grid-template-columns:1fr auto'
-
-    admin_panel = f"""<div id="stContentAdmin" class="st-tab-content" style="display:none;">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-            <button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowUsers()">&#128100; USERS</button>
-            <button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowDMs()">&#128172; DM LOGS</button>
-            <button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowGroups()">&#128483; GROUP LOGS</button>
-            <button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowLookup()">&#128269; CHAT LOOKUP</button>
-            <button class="btn-action" style="margin:0;padding:8px;font-size:11px;grid-column:span 2;" onclick="adminShowTraffic()">&#128200; TRAFFIC</button>
-            <button class="btn-action" style="margin:0;padding:8px;font-size:11px;grid-column:span 2;border-color:#fb0;color:#fb0;" onclick="adminShowResets()">&#128274; PASSWORD RESETS</button>
-        </div>
-        <div id="adminLookupBar" style="display:none;margin-bottom:8px;">
-            <div style="display:flex;gap:6px;">
-                <input id="adminLookupInput" class="field-plain" placeholder="ENTER USERNAME..." style="margin:0;flex:1;padding:8px 12px;font-size:12px;border-radius:20px;" oninput="adminLookupSuggest()" onkeydown="if(event.key==='Enter')adminLookupRun()">
-                <button class="btn-action" style="margin:0;padding:8px 14px;font-size:11px;" onclick="adminLookupRun()">&#128269;</button>
-            </div>
-            <div id="adminLookupSuggest" style="font-size:11px;border:1px solid var(--p30);border-radius:8px;margin-top:4px;display:none;max-height:100px;overflow-y:auto;"></div>
-        </div>
-        <div id="adminContent" style="max-height:300px;overflow-y:auto;text-align:left;font-size:11px;border:1px solid var(--p30);border-radius:8px;padding:4px;">
-            <div style="padding:12px;opacity:.4;text-align:center;">SELECT AN ACTION ABOVE</div>
-        </div></div>""" if admin else ''
+    admin_panel = ('<div id="stContentAdmin" class="st-tab-content" style="display:none;"><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;"><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowUsers()">&#128100; USERS</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowDMs()">&#128172; DM LOGS</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowGroups()">&#128483; GROUP LOGS</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowLookup()">&#128269; CHAT LOOKUP</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;grid-column:span 2;" onclick="adminShowTraffic()">&#128200; TRAFFIC</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;grid-column:span 2;border-color:#fb0;color:#fb0;" onclick="adminShowResets()">&#128274; PASSWORD RESETS</button></div><div id="adminLookupBar" style="display:none;margin-bottom:8px;"><div style="display:flex;gap:6px;"><input id="adminLookupInput" class="field-plain" placeholder="ENTER USERNAME..." style="margin:0;flex:1;padding:8px 12px;font-size:12px;border-radius:20px;" oninput="adminLookupSuggest()" onkeydown="if(event.key===\'Enter\')adminLookupRun()"><button class="btn-action" style="margin:0;padding:8px 14px;font-size:11px;" onclick="adminLookupRun()">&#128269;</button></div><div id="adminLookupSuggest" style="font-size:11px;border:1px solid var(--p30);border-radius:8px;margin-top:4px;display:none;max-height:100px;overflow-y:auto;"></div></div><div id="adminContent" style="max-height:300px;overflow-y:auto;text-align:left;font-size:11px;border:1px solid var(--p30);border-radius:8px;padding:4px;"><div style="padding:12px;opacity:.4;text-align:center;">SELECT AN ACTION ABOVE</div></div></div>') if admin else ''
     admin_tab = '<button class="tab" id="stTabAdmin" onclick="switchStTab(\'admin\')">&#9733; ADMIN</button>' if admin else ''
-
-    return f"""<!DOCTYPE html><html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-<link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#00ff00">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="VOX">
-<link rel="apple-touch-icon" href="/icon-192.png">
-<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
-<style>{theme_css(theme)}</style></head><body>
-<div class="crt-overlay"></div>
-<div class="scanline-a"></div><div class="scanline-b"></div><div class="scanline-c"></div>
-<div class="title-row-wrap">
-<div class="logo-wrap"><svg viewBox="0 0 400 420" width="260" height="273" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;">
-  <defs>
-    <style>
-      @keyframes spinFwd {{ from {{ transform:rotate(0deg); }} to {{ transform:rotate(360deg); }} }}
-      @keyframes spinRev {{ from {{ transform:rotate(0deg); }} to {{ transform:rotate(-360deg); }} }}
-      @keyframes fireGlow {{ 0%,100% {{ filter:drop-shadow(0 0 2px var(--p)); }} 50% {{ filter:drop-shadow(0 0 4px var(--p)); }} }}
-      .orbit-a {{ transform-origin:200px 195px; animation:spinFwd 8s linear infinite; }}
-      .orbit-b {{ transform-origin:200px 195px; animation:spinRev 12s linear infinite; }}
-      .logo-badge {{ animation:fireGlow 2.2s ease-in-out infinite; }}
-    </style>
-    <radialGradient id="lgbgG" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="var(--ac)"/><stop offset="100%" stop-color="#000a06"/></radialGradient>
-    <radialGradient id="lgrimG" cx="50%" cy="35%" r="65%"><stop offset="0%" stop-color="var(--p)" stop-opacity="0.15"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient>
-    <filter id="lgglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-    <clipPath id="lgcirc"><circle cx="200" cy="195" r="122"/></clipPath>
-    <path id="lgarcB" d="M 98,238 A 112,112 0 0,0 302,238"/>
-  </defs>
-  <g stroke="var(--p)" stroke-width="1.2" opacity="0.45">
-    <line x1="200" y1="16" x2="200" y2="32"/><line x1="200" y1="358" x2="200" y2="374"/>
-    <line x1="28" y1="195" x2="44" y2="195"/><line x1="356" y1="195" x2="372" y2="195"/>
-    <line x1="64" y1="71" x2="75" y2="82"/><line x1="336" y1="71" x2="325" y2="82"/>
-    <line x1="64" y1="319" x2="75" y2="308"/><line x1="336" y1="319" x2="325" y2="308"/>
-  </g>
-  <circle cx="200" cy="195" r="158" fill="#050a08" stroke="var(--p)" stroke-width="1.5" opacity="0.5"/>
-  <circle cx="200" cy="195" r="151" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.25"/>
-  <g class="orbit-a">
-    <ellipse cx="200" cy="195" rx="144" ry="50" fill="none" stroke="var(--p)" stroke-width="1.8" opacity="0.65" filter="url(#lgglow)" transform="rotate(-25 200 195)"/>
-    <ellipse cx="200" cy="195" rx="144" ry="50" fill="none" stroke="var(--p)" stroke-width="1.0" opacity="0.35" transform="rotate(25 200 195)"/>
-    <ellipse cx="200" cy="195" rx="144" ry="50" fill="none" stroke="var(--p)" stroke-width="0.6" opacity="0.2" transform="rotate(75 200 195)"/>
-  </g>
-  <g class="orbit-b">
-    <ellipse cx="200" cy="195" rx="136" ry="46" fill="none" stroke="var(--p)" stroke-width="1.4" opacity="0.5" filter="url(#lgglow)" transform="rotate(55 200 195)"/>
-    <ellipse cx="200" cy="195" rx="136" ry="46" fill="none" stroke="var(--p)" stroke-width="0.7" opacity="0.25" transform="rotate(-55 200 195)"/>
-  </g>
-  <g class="logo-badge">
-    <circle cx="200" cy="195" r="122" fill="url(#lgbgG)" stroke="var(--p)" stroke-width="2.8"/>
-    <circle cx="200" cy="195" r="122" fill="url(#lgrimG)"/>
-    <circle cx="200" cy="195" r="116" fill="none" stroke="var(--p)" stroke-width="0.6" opacity="0.35"/>
-  </g>
-  <g clip-path="url(#lgcirc)" stroke="var(--p)" stroke-width="0.7" fill="none" opacity="0.22">
-    <line x1="100" y1="148" x2="138" y2="148"/><line x1="138" y1="148" x2="138" y2="124"/><line x1="138" y1="124" x2="168" y2="124"/>
-    <line x1="300" y1="148" x2="262" y2="148"/><line x1="262" y1="148" x2="262" y2="124"/><line x1="262" y1="124" x2="232" y2="124"/>
-    <line x1="105" y1="235" x2="132" y2="235"/><line x1="132" y1="235" x2="132" y2="255"/><line x1="132" y1="255" x2="160" y2="255"/>
-    <line x1="295" y1="235" x2="268" y2="235"/><line x1="268" y1="235" x2="268" y2="255"/><line x1="268" y1="255" x2="240" y2="255"/>
-    <circle cx="138" cy="148" r="2.5" fill="var(--p)" opacity="0.55"/><circle cx="262" cy="148" r="2.5" fill="var(--p)" opacity="0.55"/>
-    <circle cx="132" cy="235" r="2.5" fill="var(--p)" opacity="0.55"/><circle cx="268" cy="235" r="2.5" fill="var(--p)" opacity="0.55"/>
-    <line x1="115" y1="175" x2="115" y2="210"/><line x1="285" y1="175" x2="285" y2="210"/>
-    <line x1="152" y1="108" x2="248" y2="108"/><line x1="152" y1="280" x2="248" y2="280"/>
-    <line x1="168" y1="108" x2="168" y2="118"/><line x1="232" y1="108" x2="232" y2="118"/>
-    <line x1="170" y1="155" x2="150" y2="155"/><line x1="150" y1="155" x2="150" y2="170"/>
-    <line x1="230" y1="155" x2="250" y2="155"/><line x1="250" y1="155" x2="250" y2="170"/>
-    <line x1="170" y1="240" x2="155" y2="240"/><line x1="155" y1="240" x2="155" y2="225"/>
-    <line x1="230" y1="240" x2="245" y2="240"/><line x1="245" y1="240" x2="245" y2="225"/>
-    <circle cx="150" cy="170" r="2" fill="var(--p)" opacity="0.4"/><circle cx="250" cy="170" r="2" fill="var(--p)" opacity="0.4"/>
-    <circle cx="155" cy="225" r="2" fill="var(--p)" opacity="0.4"/><circle cx="245" cy="225" r="2" fill="var(--p)" opacity="0.4"/>
-  </g>
-  <circle cx="200" cy="195" r="80" fill="none" stroke="var(--p)" stroke-width="1.6" opacity="0.45" filter="url(#lgglow)"/>
-  <circle cx="200" cy="195" r="75" fill="none" stroke="var(--p)" stroke-width="0.5" opacity="0.2"/>
-  <text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="var(--p)" filter="url(#lgglow)">VOX</text>
-  <text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="none" stroke="var(--p)" stroke-width="1.2" opacity="0.7">VOX</text>
-  <path d="M 84,244 A 122,122 0 0,0 316,244" fill="var(--ac)" stroke="var(--p)" stroke-width="1.6" opacity="0.9"/>
-  <path d="M 90,252 A 116,116 0 0,0 310,252" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.35"/>
-  <text font-family="'Courier New',Courier,monospace" font-weight="900" font-size="15" letter-spacing="4" fill="var(--p)" filter="url(#lgglow)">
-    <textPath href="#lgarcB" startOffset="50%" text-anchor="middle">VOX POPULI</textPath>
-  </text>
-  <g font-family="'Courier New',Courier,monospace" font-size="7.5" fill="var(--p)" opacity="0.38">
-    <text x="30" y="290">N-15-77</text><text x="30" y="300">SYS:ACTIV</text><text x="30" y="310">STEALTH MODE</text>
-    <text x="280" y="290">N-15-77</text><text x="275" y="300">STR:ON</text><text x="268" y="310">VOX.POPULI.LVL3</text>
-  </g>
-  <path d="M 56,195 A 144,144 0 0,1 344,195" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.2" stroke-dasharray="3 6"/>
-</svg></div>
-<div class="title-row" style="{grid_style}">{menu_html}
-    <div class="title-center"></div>
-    <div class="title-row-right">{right_btns}</div>
-</div></div>
+    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#00ff00"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black"><meta name="apple-mobile-web-app-title" content="VOX"><link rel="apple-touch-icon" href="/icon-192.png"><script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script><style>{theme_css(theme)}</style></head><body>
+<div class="crt-overlay"></div><div class="scanline-a"></div><div class="scanline-b"></div><div class="scanline-c"></div>
+<div class="title-row-wrap"><div class="logo-wrap"><svg viewBox="0 0 400 420" width="260" height="273" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;"><defs><style>@keyframes spinFwd{{from{{transform:rotate(0deg)}}to{{transform:rotate(360deg)}}}}@keyframes spinRev{{from{{transform:rotate(0deg)}}to{{transform:rotate(-360deg)}}}}@keyframes fireGlow{{0%,100%{{filter:drop-shadow(0 0 2px var(--p))}}50%{{filter:drop-shadow(0 0 4px var(--p))}}}}.orbit-a{{transform-origin:200px 195px;animation:spinFwd 8s linear infinite}}.orbit-b{{transform-origin:200px 195px;animation:spinRev 12s linear infinite}}.logo-badge{{animation:fireGlow 2.2s ease-in-out infinite}}</style><radialGradient id="lgbgG" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="var(--ac)"/><stop offset="100%" stop-color="#000a06"/></radialGradient><radialGradient id="lgrimG" cx="50%" cy="35%" r="65%"><stop offset="0%" stop-color="var(--p)" stop-opacity="0.15"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient><filter id="lgglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter><clipPath id="lgcirc"><circle cx="200" cy="195" r="122"/></clipPath><path id="lgarcB" d="M 98,238 A 112,112 0 0,0 302,238"/></defs>
+<g stroke="var(--p)" stroke-width="1.2" opacity="0.45"><line x1="200" y1="16" x2="200" y2="32"/><line x1="200" y1="358" x2="200" y2="374"/><line x1="28" y1="195" x2="44" y2="195"/><line x1="356" y1="195" x2="372" y2="195"/><line x1="64" y1="71" x2="75" y2="82"/><line x1="336" y1="71" x2="325" y2="82"/><line x1="64" y1="319" x2="75" y2="308"/><line x1="336" y1="319" x2="325" y2="308"/></g>
+<circle cx="200" cy="195" r="158" fill="#050a08" stroke="var(--p)" stroke-width="1.5" opacity="0.5"/><circle cx="200" cy="195" r="151" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.25"/>
+<g class="orbit-a"><ellipse cx="200" cy="195" rx="144" ry="50" fill="none" stroke="var(--p)" stroke-width="1.8" opacity="0.65" filter="url(#lgglow)" transform="rotate(-25 200 195)"/><ellipse cx="200" cy="195" rx="144" ry="50" fill="none" stroke="var(--p)" stroke-width="1.0" opacity="0.35" transform="rotate(25 200 195)"/><ellipse cx="200" cy="195" rx="144" ry="50" fill="none" stroke="var(--p)" stroke-width="0.6" opacity="0.2" transform="rotate(75 200 195)"/></g>
+<g class="orbit-b"><ellipse cx="200" cy="195" rx="136" ry="46" fill="none" stroke="var(--p)" stroke-width="1.4" opacity="0.5" filter="url(#lgglow)" transform="rotate(55 200 195)"/><ellipse cx="200" cy="195" rx="136" ry="46" fill="none" stroke="var(--p)" stroke-width="0.7" opacity="0.25" transform="rotate(-55 200 195)"/></g>
+<g class="logo-badge"><circle cx="200" cy="195" r="122" fill="url(#lgbgG)" stroke="var(--p)" stroke-width="2.8"/><circle cx="200" cy="195" r="122" fill="url(#lgrimG)"/><circle cx="200" cy="195" r="116" fill="none" stroke="var(--p)" stroke-width="0.6" opacity="0.35"/></g>
+<g clip-path="url(#lgcirc)" stroke="var(--p)" stroke-width="0.7" fill="none" opacity="0.22"><line x1="100" y1="148" x2="138" y2="148"/><line x1="138" y1="148" x2="138" y2="124"/><line x1="138" y1="124" x2="168" y2="124"/><line x1="300" y1="148" x2="262" y2="148"/><line x1="262" y1="148" x2="262" y2="124"/><line x1="262" y1="124" x2="232" y2="124"/><line x1="105" y1="235" x2="132" y2="235"/><line x1="132" y1="235" x2="132" y2="255"/><line x1="132" y1="255" x2="160" y2="255"/><line x1="295" y1="235" x2="268" y2="235"/><line x1="268" y1="235" x2="268" y2="255"/><line x1="268" y1="255" x2="240" y2="255"/><circle cx="138" cy="148" r="2.5" fill="var(--p)" opacity="0.55"/><circle cx="262" cy="148" r="2.5" fill="var(--p)" opacity="0.55"/><circle cx="132" cy="235" r="2.5" fill="var(--p)" opacity="0.55"/><circle cx="268" cy="235" r="2.5" fill="var(--p)" opacity="0.55"/><line x1="115" y1="175" x2="115" y2="210"/><line x1="285" y1="175" x2="285" y2="210"/><line x1="152" y1="108" x2="248" y2="108"/><line x1="152" y1="280" x2="248" y2="280"/><line x1="168" y1="108" x2="168" y2="118"/><line x1="232" y1="108" x2="232" y2="118"/><line x1="170" y1="155" x2="150" y2="155"/><line x1="150" y1="155" x2="150" y2="170"/><line x1="230" y1="155" x2="250" y2="155"/><line x1="250" y1="155" x2="250" y2="170"/><line x1="170" y1="240" x2="155" y2="240"/><line x1="155" y1="240" x2="155" y2="225"/><line x1="230" y1="240" x2="245" y2="240"/><line x1="245" y1="240" x2="245" y2="225"/><circle cx="150" cy="170" r="2" fill="var(--p)" opacity="0.4"/><circle cx="250" cy="170" r="2" fill="var(--p)" opacity="0.4"/><circle cx="155" cy="225" r="2" fill="var(--p)" opacity="0.4"/><circle cx="245" cy="225" r="2" fill="var(--p)" opacity="0.4"/></g>
+<circle cx="200" cy="195" r="80" fill="none" stroke="var(--p)" stroke-width="1.6" opacity="0.45" filter="url(#lgglow)"/><circle cx="200" cy="195" r="75" fill="none" stroke="var(--p)" stroke-width="0.5" opacity="0.2"/>
+<text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="var(--p)" filter="url(#lgglow)">VOX</text><text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="none" stroke="var(--p)" stroke-width="1.2" opacity="0.7">VOX</text>
+<path d="M 84,244 A 122,122 0 0,0 316,244" fill="var(--ac)" stroke="var(--p)" stroke-width="1.6" opacity="0.9"/><path d="M 90,252 A 116,116 0 0,0 310,252" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.35"/>
+<text font-family="'Courier New',Courier,monospace" font-weight="900" font-size="15" letter-spacing="4" fill="var(--p)" filter="url(#lgglow)"><textPath href="#lgarcB" startOffset="50%" text-anchor="middle">VOX POPULI</textPath></text>
+<g font-family="'Courier New',Courier,monospace" font-size="7.5" fill="var(--p)" opacity="0.38"><text x="30" y="290">N-15-77</text><text x="30" y="300">SYS:ACTIV</text><text x="30" y="310">STEALTH MODE</text><text x="280" y="290">N-15-77</text><text x="275" y="300">STR:ON</text><text x="268" y="310">VOX.POPULI.LVL3</text></g>
+<path d="M 56,195 A 144,144 0 0,1 344,195" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.2" stroke-dasharray="3 6"/>
+</svg></div><div class="title-row" style="{grid_style}">{menu_html}<div class="title-center"></div><div class="title-row-right">{right_btns}</div></div></div>
 <div class="page-content" style="width:100%;max-width:960px;margin:0 auto;padding:0 12px 40px;box-sizing:border-box;">{content}</div>
-<div class="modal-overlay" id="postModal"><div class="modal-box" style="max-width:720px;width:96%;padding:0;overflow:hidden;">
-    <div style="padding:10px 14px;background:var(--p10);border-bottom:2px solid var(--p);display:flex;align-items:center;justify-content:space-between;">
-        <span style="font-size:13px;letter-spacing:2px;">// COMMUNITY BOARD //</span>
-        <button onclick="closeModal('postModal')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:16px;padding:0 4px;">&#10006;</button>
-    </div>
-    <div id="postFeed" style="max-height:380px;overflow-y:auto;background:rgba(0,0,0,.75);min-height:80px;"><div style="padding:16px;opacity:.4;text-align:center;font-size:11px;">LOADING...</div></div>
-    <div id="postErr" class="error-msg" style="padding:0 12px;margin:0;"></div>
-    <div style="padding:9px 10px;border-top:2px solid var(--p);display:flex;gap:7px;align-items:flex-end;background:rgba(0,0,0,.9);">
-        <textarea id="postContent" placeholder="SHARE WITH THE COMMUNITY..." oninput="updatePostCount(this)"
-            style="flex:1;padding:9px 14px;background:rgba(0,0,0,.8);border:2px solid var(--p);border-radius:12px;color:var(--p);font-family:'Courier New',monospace;font-size:12px;text-transform:none;resize:none;height:38px;max-height:120px;overflow-y:auto;line-height:1.4;box-sizing:border-box;"
-            onkeydown="if(event.key==='Enter'&&!event.shiftKey){{event.preventDefault();submitPost();}}"></textarea>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-            <span id="postCount" style="font-size:9px;opacity:.3;">0/500</span>
-            <button class="send-btn" onclick="submitPost()">&#9658;</button>
-        </div>
-    </div>
-</div></div>
-<div class="modal-overlay" id="loginModal"><div class="modal-box">
-    <h2>// ACCESS //</h2><div id="loginErr" class="error-msg"></div>
-    <input class="field-plain" id="loginUser" placeholder="USERNAME" type="text" autocomplete="username" style="text-transform:none;">
-    {pw_field("loginPass","PASSWORD")}<br>
-    <button class="btn-action" onclick="doLogin()">&#9658; AUTHENTICATE</button>
-    <button class="btn-action" style="margin-left:8px;" onclick="closeModal('loginModal')">&#10006; CANCEL</button>
-    <div style="margin-top:14px;font-size:11px;opacity:.6;">FORGOT YOUR PASSWORD? <span style="text-decoration:underline;cursor:pointer;color:var(--p);" onclick="closeModal('loginModal');openModal('resetModal')">REQUEST A RESET</span></div>
-</div></div>
-<div class="modal-overlay" id="resetModal"><div class="modal-box">
-    <h2>// PASSWORD RESET //</h2>
-    <div style="font-size:11px;opacity:.6;margin-bottom:14px;">ENTER YOUR USERNAME AND AN ADMIN WILL SET A TEMPORARY PASSWORD FOR YOU.</div>
-    <div id="resetErr" class="error-msg"></div><div id="resetOk" class="success-msg"></div>
-    <input class="field-plain" id="resetUser" placeholder="YOUR USERNAME" type="text" style="text-transform:none;"><br>
-    <button class="btn-action" onclick="doResetRequest()">&#9658; REQUEST RESET</button>
-    <button class="btn-action" style="margin-left:8px;" onclick="closeModal('resetModal')">&#10006; CANCEL</button>
-</div></div>
-<div class="modal-overlay" id="registerModal"><div class="modal-box">
-    <h2>// ENLIST //</h2>
-    <div style="font-size:10px;opacity:.5;margin-bottom:10px;">&#9888; YOU MUST BE 18 OR OLDER TO JOIN</div>
-    <div id="regErr" class="error-msg"></div>
-    <input class="field-plain" id="regUser" placeholder="CHOOSE USERNAME" type="text" autocomplete="username" style="text-transform:none;">
-    {pw_field("regPass","CHOOSE PASSWORD","new-password")}{pw_field("regPass2","CONFIRM PASSWORD","new-password")}
-    <div class="section-label">DATE OF BIRTH:</div>
-    <input class="field-plain" id="regDob" type="date" style="color-scheme:dark;">
-    <div class="section-label">SELECT THEME:</div>
-    <div class="theme-grid">{theme_btns("setRegTheme")}</div><br>
-    <button class="btn-action" onclick="doRegister()">&#9658; ENLIST</button>
-    <button class="btn-action" style="margin-left:8px;" onclick="closeModal('registerModal')">&#10006; CANCEL</button>
-</div></div>
-<div class="modal-overlay" id="settingsModal"><div class="modal-box" style="max-width:660px;width:96%;">
-    <h2>// SETTINGS //</h2>
-    <div class="tab-bar" style="margin-bottom:16px;">
-        <button class="tab active" id="stTabTheme" onclick="switchStTab('theme')">&#127774; THEME</button>
-        <button class="tab" id="stTabPw" onclick="switchStTab('pw')">&#128274; PASSWORD</button>
-        {admin_tab}
-    </div>
-    <div id="stContentTheme" class="st-tab-content" style="display:block;"><div class="section-label">CHANGE THEME:</div><div class="theme-grid">{theme_btns("changeTheme")}</div></div>
-    <div id="stContentPw" class="st-tab-content" style="display:none;">
-        <div class="section-label">CHANGE PASSWORD:</div>
-        <div id="pwErr" class="error-msg"></div><div id="pwOk" class="success-msg"></div>
-        {pw_field("pwCurrent","CURRENT PASSWORD")}{pw_field("pwNew","NEW PASSWORD (MIN 6)","new-password")}{pw_field("pwNew2","CONFIRM NEW PASSWORD","new-password")}<br>
-        <button class="btn-action" onclick="changePassword()">&#9658; UPDATE PASSWORD</button>
-    </div>
-    {admin_panel}<br>
-    <button class="btn-action" onclick="closeModal('settingsModal')">&#10006; CLOSE</button>
-</div></div>
-<div class="traffic-counter">
-  <div class="tc-row"><div class="tc-dot"></div><span class="tc-label">ONLINE</span>&nbsp;<span class="tc-val" id="tcOnline">...</span></div>
-  <div class="tc-row"><span class="tc-label">TODAY</span>&nbsp;<span class="tc-val" id="tcToday">...</span></div>
-  <div class="tc-row"><span class="tc-label">ALL&#8209;TIME</span>&nbsp;<span class="tc-val" id="tcTotal">...</span></div>
-  <div class="tc-row"><span class="tc-label">MEMBERS</span>&nbsp;<span class="tc-val" id="tcMembers">...</span></div>
-</div>
+<div class="modal-overlay" id="postModal"><div class="modal-box" style="max-width:720px;width:96%;padding:0;overflow:hidden;">{cyber_box("// COMMUNITY BOARD //",'<div id="postFeed" style="max-height:380px;overflow-y:auto;background:rgba(0,0,0,.75);min-height:80px;"><div style="padding:16px;opacity:.4;text-align:center;font-size:11px;">LOADING...</div></div>',title_right='<button onclick="closeModal(\'postModal\')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:16px;padding:0 4px;">&#10006;</button>',footer='<div id="postErr" class="error-msg" style="padding:0 12px;margin:0;"></div><div style="padding:9px 10px;border-top:2px solid var(--p);display:flex;gap:7px;align-items:flex-end;background:rgba(0,0,0,.9);"><textarea id="postContent" placeholder="SHARE WITH THE COMMUNITY..." oninput="updatePostCount(this)" style="flex:1;padding:9px 14px;background:rgba(0,0,0,.8);border:2px solid var(--p);border-radius:12px;color:var(--p);font-family:\'Courier New\',monospace;font-size:12px;text-transform:none;resize:none;height:38px;max-height:120px;overflow-y:auto;line-height:1.4;box-sizing:border-box;" onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){{event.preventDefault();submitPost();}}"></textarea><div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;"><span id="postCount" style="font-size:9px;opacity:.3;">0/500</span><button class="send-btn" onclick="submitPost()">&#9658;</button></div></div>',mb="0",radius="0")}</div></div>
+<div class="modal-overlay" id="loginModal"><div class="modal-box"><h2>// ACCESS //</h2><div id="loginErr" class="error-msg"></div><input class="field-plain" id="loginUser" placeholder="USERNAME" type="text" autocomplete="username" style="text-transform:none;">{pw_field("loginPass","PASSWORD")}<br><button class="btn-action" onclick="doLogin()">&#9658; AUTHENTICATE</button><button class="btn-action" style="margin-left:8px;" onclick="closeModal('loginModal')">&#10006; CANCEL</button><div style="margin-top:14px;font-size:11px;opacity:.6;">FORGOT YOUR PASSWORD? <span style="text-decoration:underline;cursor:pointer;color:var(--p);" onclick="closeModal('loginModal');openModal('resetModal')">REQUEST A RESET</span></div></div></div>
+<div class="modal-overlay" id="resetModal"><div class="modal-box"><h2>// PASSWORD RESET //</h2><div style="font-size:11px;opacity:.6;margin-bottom:14px;">ENTER YOUR USERNAME AND AN ADMIN WILL SET A TEMPORARY PASSWORD FOR YOU.</div><div id="resetErr" class="error-msg"></div><div id="resetOk" class="success-msg"></div><input class="field-plain" id="resetUser" placeholder="YOUR USERNAME" type="text" style="text-transform:none;"><br><button class="btn-action" onclick="doResetRequest()">&#9658; REQUEST RESET</button><button class="btn-action" style="margin-left:8px;" onclick="closeModal('resetModal')">&#10006; CANCEL</button></div></div>
+<div class="modal-overlay" id="registerModal"><div class="modal-box"><h2>// ENLIST //</h2><div style="font-size:10px;opacity:.5;margin-bottom:10px;">&#9888; YOU MUST BE 18 OR OLDER TO JOIN</div><div id="regErr" class="error-msg"></div><input class="field-plain" id="regUser" placeholder="CHOOSE USERNAME" type="text" autocomplete="username" style="text-transform:none;">{pw_field("regPass","CHOOSE PASSWORD","new-password")}{pw_field("regPass2","CONFIRM PASSWORD","new-password")}<div class="section-label">DATE OF BIRTH:</div><input class="field-plain" id="regDob" type="date" style="color-scheme:dark;"><div class="section-label">SELECT THEME:</div><div class="theme-grid">{theme_btns("setRegTheme")}</div><br><button class="btn-action" onclick="doRegister()">&#9658; ENLIST</button><button class="btn-action" style="margin-left:8px;" onclick="closeModal('registerModal')">&#10006; CANCEL</button></div></div>
+<div class="modal-overlay" id="settingsModal"><div class="modal-box" style="max-width:660px;width:96%;"><h2>// SETTINGS //</h2><div class="tab-bar" style="margin-bottom:16px;"><button class="tab active" id="stTabTheme" onclick="switchStTab('theme')">&#127774; THEME</button><button class="tab" id="stTabPw" onclick="switchStTab('pw')">&#128274; PASSWORD</button>{admin_tab}</div><div id="stContentTheme" class="st-tab-content" style="display:block;"><div class="section-label">CHANGE THEME:</div><div class="theme-grid">{theme_btns("changeTheme")}</div></div><div id="stContentPw" class="st-tab-content" style="display:none;"><div class="section-label">CHANGE PASSWORD:</div><div id="pwErr" class="error-msg"></div><div id="pwOk" class="success-msg"></div>{pw_field("pwCurrent","CURRENT PASSWORD")}{pw_field("pwNew","NEW PASSWORD (MIN 6)","new-password")}{pw_field("pwNew2","CONFIRM NEW PASSWORD","new-password")}<br><button class="btn-action" onclick="changePassword()">&#9658; UPDATE PASSWORD</button></div>{admin_panel}<br><button class="btn-action" onclick="closeModal('settingsModal')">&#10006; CLOSE</button></div></div>
+<div class="traffic-counter"><div class="tc-row"><div class="tc-dot"></div><span class="tc-label">ONLINE</span>&nbsp;<span class="tc-val" id="tcOnline">...</span></div><div class="tc-row"><span class="tc-label">TODAY</span>&nbsp;<span class="tc-val" id="tcToday">...</span></div><div class="tc-row"><span class="tc-label">ALL&#8209;TIME</span>&nbsp;<span class="tc-val" id="tcTotal">...</span></div><div class="tc-row"><span class="tc-label">MEMBERS</span>&nbsp;<span class="tc-val" id="tcMembers">...</span></div></div>
 <script>
 let activeDMUser=null,activeGroupId=null,activeGroupName=null,activePrivateRoomId=null,activePrivateRoomName=null;
 let regThemeVal='green',onlineUsers=new Set();
@@ -535,86 +321,24 @@ const openModal=id=>$(id).classList.add('open');
 const closeModal=id=>$(id).classList.remove('open');
 function togglePw(id,btn){{const i=$(id);i.type=i.type==='password'?'text':'password';btn.innerHTML=i.type==='password'?'&#128065;':'&#128584;'}}
 function setRegTheme(t){{regThemeVal=t}}
-function mobileShowChat(type){{
-  if(!isMobile())return;
-  const sMap={{dm:'dmSidebar',group:'groupSidebar',private:'privateSidebar'}};
-  const mMap={{dm:'dmMain',group:'groupMain',private:'privateMain'}};
-  const s=$(sMap[type]),m=$(mMap[type]);
-  if(s)s.classList.remove('mobile-show');
-  if(m){{m.classList.add('mobile-show');const btn=m.querySelector('.mobile-back-btn');if(btn)btn.style.display='flex';}}
-}}
-function mobileShowSidebar(type){{
-  if(!isMobile())return;
-  const sMap={{dm:'dmSidebar',group:'groupSidebar',private:'privateSidebar'}};
-  const mMap={{dm:'dmMain',group:'groupMain',private:'privateMain'}};
-  const s=$(sMap[type]),m=$(mMap[type]);
-  if(s)s.classList.add('mobile-show');if(m)m.classList.remove('mobile-show');
-  const b=m&&m.querySelector('.mobile-back-btn');if(b)b.style.display='none';
-}}
+function mobileShowChat(type){{if(!isMobile())return;const sMap={{dm:'dmSidebar',group:'groupSidebar',private:'privateSidebar'}},mMap={{dm:'dmMain',group:'groupMain',private:'privateMain'}},s=$(sMap[type]),m=$(mMap[type]);if(s)s.classList.remove('mobile-show');if(m){{m.classList.add('mobile-show');const btn=m.querySelector('.mobile-back-btn');if(btn)btn.style.display='flex';}}}}
+function mobileShowSidebar(type){{if(!isMobile())return;const sMap={{dm:'dmSidebar',group:'groupSidebar',private:'privateSidebar'}},mMap={{dm:'dmMain',group:'groupMain',private:'privateMain'}},s=$(sMap[type]),m=$(mMap[type]);if(s)s.classList.add('mobile-show');if(m)m.classList.remove('mobile-show');const b=m&&m.querySelector('.mobile-back-btn');if(b)b.style.display='none';}}
 document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('open')}}));
-document.addEventListener('click',e=>{{
-  const menu=$('accountMenu');
-  if(menu&&!e.target.closest('.menu-wrap'))menu.classList.remove('open');
-  if(!e.target.closest('#newDmUser')&&!e.target.closest('#dmUserSuggest'))hideDmSuggest();
-  const item=e.target.closest('[data-action]');
-  if(item){{
-    if(menu)menu.classList.remove('open');
-    const a=item.dataset.action;
-    if(a==='settings')openModal('settingsModal');
-    else if(a==='login')openModal('loginModal');
-    else if(a==='register')openModal('registerModal');
-  }}
-}});
-
+document.addEventListener('click',e=>{{const menu=$('accountMenu');if(menu&&!e.target.closest('.menu-wrap'))menu.classList.remove('open');if(!e.target.closest('#newDmUser')&&!e.target.closest('#dmUserSuggest'))hideDmSuggest();const item=e.target.closest('[data-action]');if(item){{if(menu)menu.classList.remove('open');const a=item.dataset.action;if(a==='settings')openModal('settingsModal');else if(a==='login')openModal('loginModal');else if(a==='register')openModal('registerModal');}}}});
 // ── AUTH ──────────────────────────────────────────────────────────────────
-async function doLogin(){{
-  const d=await api('/api/login',{{username:$('loginUser').value.trim(),password:$('loginPass').value}});
-  d.ok?location.reload():$('loginErr').textContent='ERROR: '+d.error;
-}}
-async function doRegister(){{
-  const p=$('regPass').value,p2=$('regPass2').value,dob=$('regDob').value;
-  if(!dob){{$('regErr').textContent='DATE OF BIRTH REQUIRED';return}}
-  if((Date.now()-new Date(dob))/31557600000<18){{$('regErr').textContent='YOU MUST BE 18 OR OLDER TO JOIN';return}}
-  if(p!==p2){{$('regErr').textContent='PASSWORDS DO NOT MATCH';return}}
-  const d=await api('/api/register',{{username:$('regUser').value.trim(),password:p,theme:regThemeVal}});
-  d.ok?location.reload():$('regErr').textContent='ERROR: '+d.error;
-}}
-async function doResetRequest(){{
-  const u=$('resetUser').value.trim(),err=$('resetErr'),ok=$('resetOk');
-  err.textContent='';ok.textContent='';
-  if(!u){{err.textContent='USERNAME REQUIRED';return}}
-  const d=await api('/api/reset/request',{{username:u}});
-  d.ok?ok.textContent='REQUEST SENT — AN ADMIN WILL SET A TEMP PASSWORD FOR YOU.':err.textContent='ERROR: '+d.error;
-}}
-async function changePassword(){{
-  const cur=$('pwCurrent').value,nw=$('pwNew').value,nw2=$('pwNew2').value,err=$('pwErr'),ok=$('pwOk');
-  err.textContent='';ok.textContent='';
-  if(!cur||!nw||!nw2){{err.textContent='ALL FIELDS REQUIRED';return}}
-  if(nw!==nw2){{err.textContent='PASSWORDS DO NOT MATCH';return}}
-  if(nw.length<6){{err.textContent='TOO SHORT (MIN 6)';return}}
-  const d=await api('/api/change-password',{{current:cur,new_password:nw}});
-  if(d.ok){{ok.textContent='PASSWORD UPDATED';['pwCurrent','pwNew','pwNew2'].forEach(i=>$(i).value='')}}
-  else err.textContent='ERROR: '+d.error;
-}}
+async function doLogin(){{const d=await api('/api/login',{{username:$('loginUser').value.trim(),password:$('loginPass').value}});d.ok?location.reload():$('loginErr').textContent='ERROR: '+d.error;}}
+async function doRegister(){{const p=$('regPass').value,p2=$('regPass2').value,dob=$('regDob').value;if(!dob){{$('regErr').textContent='DATE OF BIRTH REQUIRED';return}}if((Date.now()-new Date(dob))/31557600000<18){{$('regErr').textContent='YOU MUST BE 18 OR OLDER TO JOIN';return}}if(p!==p2){{$('regErr').textContent='PASSWORDS DO NOT MATCH';return}}const d=await api('/api/register',{{username:$('regUser').value.trim(),password:p,theme:regThemeVal}});d.ok?location.reload():$('regErr').textContent='ERROR: '+d.error;}}
+async function doResetRequest(){{const u=$('resetUser').value.trim(),err=$('resetErr'),ok=$('resetOk');err.textContent='';ok.textContent='';if(!u){{err.textContent='USERNAME REQUIRED';return}}const d=await api('/api/reset/request',{{username:u}});d.ok?ok.textContent='REQUEST SENT — AN ADMIN WILL SET A TEMP PASSWORD FOR YOU.':err.textContent='ERROR: '+d.error;}}
+async function changePassword(){{const cur=$('pwCurrent').value,nw=$('pwNew').value,nw2=$('pwNew2').value,err=$('pwErr'),ok=$('pwOk');err.textContent='';ok.textContent='';if(!cur||!nw||!nw2){{err.textContent='ALL FIELDS REQUIRED';return}}if(nw!==nw2){{err.textContent='PASSWORDS DO NOT MATCH';return}}if(nw.length<6){{err.textContent='TOO SHORT (MIN 6)';return}}const d=await api('/api/change-password',{{current:cur,new_password:nw}});if(d.ok){{ok.textContent='PASSWORD UPDATED';['pwCurrent','pwNew','pwNew2'].forEach(i=>$(i).value='')}}else err.textContent='ERROR: '+d.error;}}
 async function changeTheme(t){{await api('/api/theme',{{theme:t}});location.reload()}}
-
 // ── SETTINGS TABS ─────────────────────────────────────────────────────────
-function switchStTab(tab){{
-  ['theme','pw','admin'].forEach(k=>{{
-    const K=k[0].toUpperCase()+k.slice(1),c=$('stContent'+K),b=$('stTab'+K);
-    if(c)c.style.display=k===tab?'block':'none';
-    if(b)b.classList.toggle('active',k===tab);
-  }});
-  if(tab==='admin')adminShowUsers();
-}}
-
+function switchStTab(tab){{['theme','pw','admin'].forEach(k=>{{const K=k[0].toUpperCase()+k.slice(1),c=$('stContent'+K),b=$('stTab'+K);if(c)c.style.display=k===tab?'block':'none';if(b)b.classList.toggle('active',k===tab);}});if(tab==='admin')adminShowUsers();}}
 // ── ADMIN ─────────────────────────────────────────────────────────────────
 const adminBox=()=>$('adminContent');
 const adminErr=msg=>adminBox().innerHTML=`<div style="padding:10px;color:#f44;">${{msg}}</div>`;
 const msgRow=(m,fn)=>`<div style="padding:6px 10px 6px 20px;border-top:1px solid var(--p10);display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
   <div><span style="opacity:.5;font-size:10px;">${{m.sender}} &middot; ${{m.timestamp}}</span><br>${{m.content}}</div>
   <button class="btn-action" style="padding:2px 6px;font-size:10px;margin:0;border-color:#f44;color:#f44;flex-shrink:0;" onclick="${{fn}}(${{m.id}})">&#128465;</button></div>`;
-
 async function adminShowUsers(){{
   adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';
   const d=await api('/api/admin/users');
@@ -630,142 +354,23 @@ async function adminShowUsers(){{
 }}
 async function adminToggleAdmin(u,g){{await api('/api/admin/set-admin',{{username:u,grant:g}});adminShowUsers()}}
 async function adminRemoveUser(u){{if(!confirm('REMOVE: '+u+'?'))return;const d=await api('/api/admin/remove-user',{{username:u}});d.ok?adminShowUsers():alert('ERROR: '+d.error);}}
-
-async function adminShowDMs(){{
-  adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';
-  const d=await api('/api/admin/dm-log');
-  if(!d.ok){{adminErr('ERROR');return}}
-  if(!d.messages.length){{adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">NO MESSAGES</div>';return}}
-  const convos={{}};
-  d.messages.forEach(m=>{{const k=[m.sender,m.recipient].sort().join('|');if(!convos[k])convos[k]={{users:[m.sender,m.recipient].sort(),messages:[]}};convos[k].messages.push(m)}});
-  let html='<div style="padding:6px 10px;opacity:.5;font-size:10px;border-bottom:1px solid var(--p10);">&#128172; DM CONVERSATIONS</div>';
-  Object.values(convos).forEach(c=>{{
-    const[u1,u2]=c.users;
-    html+=`<div style="border-bottom:2px solid var(--p30);"><div style="padding:8px 10px;background:var(--p10);display:flex;justify-content:space-between;align-items:center;">
-      <span style="font-size:11px;">${{u1}} &#8596; ${{u2}} (${{c.messages.length}})</span>
-      <button class="btn-action" style="padding:3px 8px;font-size:10px;margin:0;border-color:#f44;color:#f44;" onclick="adminDeleteConvo('${{u1}}','${{u2}}')">&#128465; ALL</button></div>`;
-    c.messages.forEach(m=>{{html+=msgRow(m,'adminDeleteDM')}});html+='</div>';
-  }});
-  adminBox().innerHTML=html;
-}}
+async function adminShowDMs(){{adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';const d=await api('/api/admin/dm-log');if(!d.ok){{adminErr('ERROR');return}}if(!d.messages.length){{adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">NO MESSAGES</div>';return}}const convos={{}};d.messages.forEach(m=>{{const k=[m.sender,m.recipient].sort().join('|');if(!convos[k])convos[k]={{users:[m.sender,m.recipient].sort(),messages:[]}};convos[k].messages.push(m)}});let html='<div style="padding:6px 10px;opacity:.5;font-size:10px;border-bottom:1px solid var(--p10);">&#128172; DM CONVERSATIONS</div>';Object.values(convos).forEach(c=>{{const[u1,u2]=c.users;html+=`<div style="border-bottom:2px solid var(--p30);"><div style="padding:8px 10px;background:var(--p10);display:flex;justify-content:space-between;align-items:center;"><span style="font-size:11px;">${{u1}} &#8596; ${{u2}} (${{c.messages.length}})</span><button class="btn-action" style="padding:3px 8px;font-size:10px;margin:0;border-color:#f44;color:#f44;" onclick="adminDeleteConvo('${{u1}}','${{u2}}')">&#128465; ALL</button></div>`;c.messages.forEach(m=>{{html+=msgRow(m,'adminDeleteDM')}});html+='</div>';}});adminBox().innerHTML=html;}}
 async function adminDeleteDM(id){{await api('/api/admin/delete-dm',{{id}});adminShowDMs()}}
 async function adminDeleteConvo(u1,u2){{if(!confirm('DELETE CHAT: '+u1+' & '+u2+'?'))return;const d=await api('/api/admin/delete-convo',{{user1:u1,user2:u2}});d.ok?adminShowDMs():alert('ERROR: '+d.error);}}
-
-async function adminShowGroups(){{
-  adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';
-  const[d,dg]=await Promise.all([api('/api/admin/group-log'),api('/api/groups')]);
-  if(!d.ok){{adminErr('ERROR');return}}
-  const ch={{}};
-  d.messages.forEach(m=>{{if(!ch[m.group_id])ch[m.group_id]={{id:m.group_id,name:m.group,messages:[],locked:false}};ch[m.group_id].messages.push(m)}});
-  if(dg.ok)dg.groups.forEach(g=>{{if(!ch[g.id])ch[g.id]={{id:g.id,name:g.name,messages:[],locked:g.locked}};else ch[g.id].locked=g.locked}});
-  if(!Object.keys(ch).length){{adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">NO CHANNELS</div>';return}}
-  let html='<div style="padding:6px 10px;opacity:.5;font-size:10px;border-bottom:1px solid var(--p10);">&#128483; CHANNELS</div>';
-  Object.values(ch).forEach(c=>{{
-    const lc=c.locked?'#fa0':'#4af',li=c.locked?'&#128274;':'&#128275;';
-    html+=`<div style="border-bottom:2px solid var(--p30);"><div style="padding:8px 10px;background:var(--p10);display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap;">
-      <span style="font-size:11px;">${{li}} ${{c.name}} (${{c.messages.length}})${{c.locked?' <span style="color:#fa0;font-size:10px;">LOCKED</span>':''}}</span>
-      <div style="display:flex;gap:4px;">
-        <button class="btn-action" style="padding:3px 8px;font-size:10px;margin:0;border-color:${{lc}};color:${{lc}};" onclick="adminLockChannel(${{c.id}},${{!c.locked}})">${{c.locked?'UNLOCK':'LOCK'}}</button>
-        <button class="btn-action" style="padding:3px 8px;font-size:10px;margin:0;border-color:#f44;color:#f44;" onclick="adminDeleteChannel(${{c.id}},'${{c.name}}')">&#128465;</button>
-      </div></div>`;
-    c.messages.forEach(m=>{{html+=msgRow(m,'adminDeleteGroupMsg')}});html+='</div>';
-  }});
-  adminBox().innerHTML=html;
-}}
+async function adminShowGroups(){{adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';const[d,dg]=await Promise.all([api('/api/admin/group-log'),api('/api/groups')]);if(!d.ok){{adminErr('ERROR');return}}const ch={{}};d.messages.forEach(m=>{{if(!ch[m.group_id])ch[m.group_id]={{id:m.group_id,name:m.group,messages:[],locked:false}};ch[m.group_id].messages.push(m)}});if(dg.ok)dg.groups.forEach(g=>{{if(!ch[g.id])ch[g.id]={{id:g.id,name:g.name,messages:[],locked:g.locked}};else ch[g.id].locked=g.locked}});if(!Object.keys(ch).length){{adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">NO CHANNELS</div>';return}}let html='<div style="padding:6px 10px;opacity:.5;font-size:10px;border-bottom:1px solid var(--p10);">&#128483; CHANNELS</div>';Object.values(ch).forEach(c=>{{const lc=c.locked?'#fa0':'#4af',li=c.locked?'&#128274;':'&#128275;';html+=`<div style="border-bottom:2px solid var(--p30);"><div style="padding:8px 10px;background:var(--p10);display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap;"><span style="font-size:11px;">${{li}} ${{c.name}} (${{c.messages.length}})${{c.locked?' <span style="color:#fa0;font-size:10px;">LOCKED</span>':''}}</span><div style="display:flex;gap:4px;"><button class="btn-action" style="padding:3px 8px;font-size:10px;margin:0;border-color:${{lc}};color:${{lc}};" onclick="adminLockChannel(${{c.id}},${{!c.locked}})">${{c.locked?'UNLOCK':'LOCK'}}</button><button class="btn-action" style="padding:3px 8px;font-size:10px;margin:0;border-color:#f44;color:#f44;" onclick="adminDeleteChannel(${{c.id}},'${{c.name}}')">&#128465;</button></div></div>`;c.messages.forEach(m=>{{html+=msgRow(m,'adminDeleteGroupMsg')}});html+='</div>';}});adminBox().innerHTML=html;}}
 async function adminLockChannel(gid,lock){{const d=await api('/api/admin/lock-channel',{{group_id:gid,lock}});d.ok?adminShowGroups():alert('ERROR: '+d.error)}}
 async function adminDeleteGroupMsg(id){{await api('/api/admin/delete-group-msg',{{id}});adminShowGroups()}}
 async function adminDeleteChannel(gid,gname){{if(!confirm('DELETE #'+gname+'?'))return;const d=await api('/api/admin/delete-channel',{{group_id:gid}});d.ok?adminShowGroups():alert('ERROR: '+d.error);}}
-
-function adminShowLookup(){{
-  $('adminLookupBar').style.display='block';
-  adminBox().innerHTML='<div style="padding:12px;opacity:.4;text-align:center;">TYPE A USERNAME TO LOOK UP DM HISTORY</div>';
-  $('adminLookupInput').value='';$('adminLookupSuggest').style.display='none';$('adminLookupInput').focus();
-}}
-async function adminLookupSuggest(){{
-  const q=$('adminLookupInput').value.trim(),box=$('adminLookupSuggest');
-  if(!q){{box.style.display='none';return}}
-  const d=await api('/api/users/search?q='+encodeURIComponent(q));
-  if(!d.ok||!d.users.length){{box.style.display='none';return}}
-  box.style.display='block';
-  box.innerHTML=d.users.map(u=>`<div style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--p10);" onmouseover="this.style.background='var(--p10)'" onmouseout="this.style.background=''" onmousedown="event.preventDefault();$('adminLookupInput').value='${{u}}';$('adminLookupSuggest').style.display='none';adminLookupRun();">${{u}}</div>`).join('');
-}}
-async function adminLookupRun(){{
-  const username=$('adminLookupInput').value.trim();if(!username)return;
-  $('adminLookupSuggest').style.display='none';
-  adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';
-  const d=await api('/api/admin/user-chat?username='+encodeURIComponent(username));
-  if(!d.ok){{adminErr(d.error);return}}
-  if(!d.conversations.length){{adminBox().innerHTML=`<div style="padding:12px;opacity:.4;text-align:center;">NO DM HISTORY FOR ${{username.toUpperCase()}}</div>`;return}}
-  let html=`<div style="padding:6px 10px;background:var(--p10);border-bottom:2px solid var(--p30);font-size:11px;">&#128269; ${{username.toUpperCase()}} — ${{d.total}} msgs / ${{d.conversations.length}} convos</div>`;
-  d.conversations.forEach(conv=>{{
-    html+=`<div style="border-bottom:2px solid var(--p30);"><div style="padding:8px 10px;background:var(--p10);display:flex;justify-content:space-between;align-items:center;">
-      <span>${{username}} &#8596; ${{conv.partner}} (${{conv.messages.length}})</span>
-      <button class="btn-action" style="padding:3px 8px;font-size:10px;margin:0;border-color:#f44;color:#f44;" onclick="adminDeleteConvo('${{username}}','${{conv.partner}}')">&#128465; ALL</button></div>`;
-    conv.messages.forEach(m=>{{
-      const mine=m.sender===username;
-      html+=`<div style="padding:6px 10px 6px ${{mine?'30px':'10px'}};border-top:1px solid var(--p10);display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
-        <div><span style="opacity:.5;font-size:10px;">${{mine?'&#9658;':'&#9664;'}} ${{m.sender}} &#8594; ${{m.recipient}} &middot; ${{m.timestamp}}</span><br>${{m.content}}</div>
-        <button class="btn-action" style="padding:2px 6px;font-size:10px;margin:0;border-color:#f44;color:#f44;flex-shrink:0;" onclick="adminDeleteDM(${{m.id}});adminLookupRun();">&#128465;</button></div>`;
-    }});html+='</div>';
-  }});
-  adminBox().innerHTML=html;
-}}
-async function adminShowTraffic(){{
-  $('adminLookupBar').style.display='none';
-  adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';
-  const d=await api('/api/admin/traffic');if(!d.ok){{adminErr('ERROR');return}}
-  const max=Math.max(...d.days.map(r=>r.visitors),1);
-  let html=`<div style="padding:8px 10px;background:var(--p10);border-bottom:1px solid var(--p30);display:flex;justify-content:space-between;font-size:11px;"><span>&#128200; SITE TRAFFIC</span><span>TODAY: <b>${{d.today}}</b> &nbsp;|&nbsp; ALL TIME: <b>${{d.total}}</b></span></div>`;
-  d.days.forEach(r=>{{const pct=Math.round(r.visitors/max*100);
-    html+=`<div style="padding:6px 10px;border-bottom:1px solid var(--p10);display:flex;align-items:center;gap:8px;font-size:11px;">
-      <span style="width:80px;flex-shrink:0;opacity:.7;">${{r.date}}</span>
-      <div style="flex:1;background:var(--p10);border-radius:4px;height:14px;overflow:hidden;"><div style="width:${{pct}}%;height:100%;background:var(--p);box-shadow:0 0 8px var(--p);border-radius:4px;transition:.3s;"></div></div>
-      <span style="width:28px;text-align:right;">${{r.visitors}}</span></div>`;
-  }});
-  adminBox().innerHTML=html;
-}}
-async function adminShowResets(){{
-  $('adminLookupBar').style.display='none';
-  adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';
-  const d=await api('/api/admin/reset-requests');if(!d.ok){{adminErr('ERROR');return}}
-  if(!d.requests.length){{adminBox().innerHTML='<div style="padding:12px;opacity:.4;text-align:center;">NO PENDING RESET REQUESTS</div>';return}}
-  let html='<div style="padding:6px 10px;opacity:.5;font-size:10px;border-bottom:1px solid var(--p10);">&#128274; PASSWORD RESET REQUESTS</div>';
-  d.requests.forEach(r=>{{
-    html+=`<div style="padding:10px;border-bottom:1px solid var(--p10);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
-      <div><span style="font-size:12px;">${{r.username}}</span><span style="font-size:10px;opacity:.5;margin-left:8px;">${{r.requested_at}}</span>
-        ${{r.temp_password?`<div style="font-size:11px;margin-top:4px;color:#4f4;">TEMP PW: <b>${{r.temp_password}}</b></div>`:''}}
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;">
-        <input id="tmpPw_${{r.id}}" class="field-plain" placeholder="SET TEMP PW..." style="margin:0;padding:5px 8px;font-size:11px;width:120px;border-radius:6px;">
-        <button class="btn-action" style="margin:0;padding:4px 10px;font-size:10px;" onclick="adminApproveReset(${{r.id}})">&#10003; SET</button>
-        <button class="btn-action" style="margin:0;padding:4px 10px;font-size:10px;border-color:#f44;color:#f44;" onclick="adminDenyReset(${{r.id}})">&#10006;</button>
-      </div></div>`;
-  }});
-  adminBox().innerHTML=html;
-}}
-async function adminApproveReset(id){{
-  const inp=document.getElementById('tmpPw_'+id),pw=inp?inp.value.trim():'';
-  if(!pw){{alert('ENTER A TEMPORARY PASSWORD');return}}
-  const d=await api('/api/admin/reset-approve',{{id,temp_password:pw}});
-  d.ok?adminShowResets():alert('ERROR: '+d.error);
-}}
-async function adminDenyReset(id){{
-  if(!confirm('DENY THIS RESET REQUEST?'))return;
-  const d=await api('/api/admin/reset-deny',{{id}});
-  d.ok?adminShowResets():alert('ERROR: '+d.error);
-}}
-
+function adminShowLookup(){{$('adminLookupBar').style.display='block';adminBox().innerHTML='<div style="padding:12px;opacity:.4;text-align:center;">TYPE A USERNAME TO LOOK UP DM HISTORY</div>';$('adminLookupInput').value='';$('adminLookupSuggest').style.display='none';$('adminLookupInput').focus();}}
+async function adminLookupSuggest(){{const q=$('adminLookupInput').value.trim(),box=$('adminLookupSuggest');if(!q){{box.style.display='none';return}}const d=await api('/api/users/search?q='+encodeURIComponent(q));if(!d.ok||!d.users.length){{box.style.display='none';return}}box.style.display='block';box.innerHTML=d.users.map(u=>`<div style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--p10);" onmouseover="this.style.background='var(--p10)'" onmouseout="this.style.background=''" onmousedown="event.preventDefault();$('adminLookupInput').value='${{u}}';$('adminLookupSuggest').style.display='none';adminLookupRun();">${{u}}</div>`).join('');}}
+async function adminLookupRun(){{const username=$('adminLookupInput').value.trim();if(!username)return;$('adminLookupSuggest').style.display='none';adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';const d=await api('/api/admin/user-chat?username='+encodeURIComponent(username));if(!d.ok){{adminErr(d.error);return}}if(!d.conversations.length){{adminBox().innerHTML=`<div style="padding:12px;opacity:.4;text-align:center;">NO DM HISTORY FOR ${{username.toUpperCase()}}</div>`;return}}let html=`<div style="padding:6px 10px;background:var(--p10);border-bottom:2px solid var(--p30);font-size:11px;">&#128269; ${{username.toUpperCase()}} — ${{d.total}} msgs / ${{d.conversations.length}} convos</div>`;d.conversations.forEach(conv=>{{html+=`<div style="border-bottom:2px solid var(--p30);"><div style="padding:8px 10px;background:var(--p10);display:flex;justify-content:space-between;align-items:center;"><span>${{username}} &#8596; ${{conv.partner}} (${{conv.messages.length}})</span><button class="btn-action" style="padding:3px 8px;font-size:10px;margin:0;border-color:#f44;color:#f44;" onclick="adminDeleteConvo('${{username}}','${{conv.partner}}')">&#128465; ALL</button></div>`;conv.messages.forEach(m=>{{const mine=m.sender===username;html+=`<div style="padding:6px 10px 6px ${{mine?'30px':'10px'}};border-top:1px solid var(--p10);display:flex;justify-content:space-between;align-items:flex-start;gap:6px;"><div><span style="opacity:.5;font-size:10px;">${{mine?'&#9658;':'&#9664;'}} ${{m.sender}} &#8594; ${{m.recipient}} &middot; ${{m.timestamp}}</span><br>${{m.content}}</div><button class="btn-action" style="padding:2px 6px;font-size:10px;margin:0;border-color:#f44;color:#f44;flex-shrink:0;" onclick="adminDeleteDM(${{m.id}});adminLookupRun();">&#128465;</button></div>`;}});html+='</div>';}});adminBox().innerHTML=html;}}
+async function adminShowTraffic(){{$('adminLookupBar').style.display='none';adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';const d=await api('/api/admin/traffic');if(!d.ok){{adminErr('ERROR');return}}const max=Math.max(...d.days.map(r=>r.visitors),1);let html=`<div style="padding:8px 10px;background:var(--p10);border-bottom:1px solid var(--p30);display:flex;justify-content:space-between;font-size:11px;"><span>&#128200; SITE TRAFFIC</span><span>TODAY: <b>${{d.today}}</b> &nbsp;|&nbsp; ALL TIME: <b>${{d.total}}</b></span></div>`;d.days.forEach(r=>{{const pct=Math.round(r.visitors/max*100);html+=`<div style="padding:6px 10px;border-bottom:1px solid var(--p10);display:flex;align-items:center;gap:8px;font-size:11px;"><span style="width:80px;flex-shrink:0;opacity:.7;">${{r.date}}</span><div style="flex:1;background:var(--p10);border-radius:4px;height:14px;overflow:hidden;"><div style="width:${{pct}}%;height:100%;background:var(--p);box-shadow:0 0 8px var(--p);border-radius:4px;transition:.3s;"></div></div><span style="width:28px;text-align:right;">${{r.visitors}}</span></div>`;}});adminBox().innerHTML=html;}}
+async function adminShowResets(){{$('adminLookupBar').style.display='none';adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';const d=await api('/api/admin/reset-requests');if(!d.ok){{adminErr('ERROR');return}}if(!d.requests.length){{adminBox().innerHTML='<div style="padding:12px;opacity:.4;text-align:center;">NO PENDING RESET REQUESTS</div>';return}}let html='<div style="padding:6px 10px;opacity:.5;font-size:10px;border-bottom:1px solid var(--p10);">&#128274; PASSWORD RESET REQUESTS</div>';d.requests.forEach(r=>{{html+=`<div style="padding:10px;border-bottom:1px solid var(--p10);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;"><div><span style="font-size:12px;">${{r.username}}</span><span style="font-size:10px;opacity:.5;margin-left:8px;">${{r.requested_at}}</span>${{r.temp_password?`<div style="font-size:11px;margin-top:4px;color:#4f4;">TEMP PW: <b>${{r.temp_password}}</b></div>`:''}}</div><div style="display:flex;gap:4px;flex-wrap:wrap;"><input id="tmpPw_${{r.id}}" class="field-plain" placeholder="SET TEMP PW..." style="margin:0;padding:5px 8px;font-size:11px;width:120px;border-radius:6px;"><button class="btn-action" style="margin:0;padding:4px 10px;font-size:10px;" onclick="adminApproveReset(${{r.id}})">&#10003; SET</button><button class="btn-action" style="margin:0;padding:4px 10px;font-size:10px;border-color:#f44;color:#f44;" onclick="adminDenyReset(${{r.id}})">&#10006;</button></div></div>`;}});adminBox().innerHTML=html;}}
+async function adminApproveReset(id){{const inp=document.getElementById('tmpPw_'+id),pw=inp?inp.value.trim():'';if(!pw){{alert('ENTER A TEMPORARY PASSWORD');return}}const d=await api('/api/admin/reset-approve',{{id,temp_password:pw}});d.ok?adminShowResets():alert('ERROR: '+d.error);}}
+async function adminDenyReset(id){{if(!confirm('DENY THIS RESET REQUEST?'))return;const d=await api('/api/admin/reset-deny',{{id}});d.ok?adminShowResets():alert('ERROR: '+d.error);}}
 // ── NEWS ──────────────────────────────────────────────────────────────────
 let activeNewsTab='world';
-function switchNewsTab(tab){{
-  activeNewsTab=tab;
-  [['newsTabWorld','world'],['newsTabUS','usnews'],['newsTabEpstein','epstein']].forEach(([id,t])=>{{
-    const el=$(id);if(!el)return;
-    el.style.background=tab===t?'var(--p)':'var(--p10)';
-    el.style.color=tab===t?'#000':'var(--p)';
-  }});
-  loadNewsFeed();
-}}
+function switchNewsTab(tab){{activeNewsTab=tab;[['newsTabWorld','world'],['newsTabUS','usnews'],['newsTabEpstein','epstein']].forEach(([id,t])=>{{const el=$(id);if(!el)return;el.style.background=tab===t?'var(--p)':'var(--p10)';el.style.color=tab===t?'#000':'var(--p)';}});loadNewsFeed();}}
 async function loadNewsFeed(){{
   try{{
     const d=await api('/api/news?type='+activeNewsTab);
@@ -798,7 +403,6 @@ async function loadNewsFeed(){{
     const feed=$('newsFeed');if(feed)feed.innerHTML='<div style="padding:12px;color:#f44;font-size:11px;">FEED ERROR</div>';
   }}
 }}
-
 // ── POSTS ─────────────────────────────────────────────────────────────────
 function updatePostCount(el){{const c=$('postCount');if(c)c.textContent=el.value.length+'/500';}}
 function markPostsRead(){{
@@ -844,7 +448,6 @@ async function submitPost(){{
 }}
 async function reactPost(postId,emoji){{await api('/api/posts/react',{{post_id:postId,emoji}});loadPosts();}}
 async function deletePost(postId){{if(!confirm('DELETE THIS POST?'))return;await api('/api/posts/delete',{{post_id:postId}});loadPosts();}}
-
 // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
 function enableNotifications(){{
   if(!('Notification' in window)){{alert('NOTIFICATIONS NOT SUPPORTED ON THIS BROWSER');return}}
@@ -939,7 +542,6 @@ async function checkNotifications(){{
     _prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,groups:newGroups,private_rooms:newPriv}};
   }}catch(e){{}}
 }}
-
 // ── TRAFFIC ───────────────────────────────────────────────────────────────
 async function loadTrafficCounter(){{
   try{{const d=await api('/api/traffic/public');if(d.ok){{$('tcOnline').textContent=d.online;$('tcToday').textContent=d.today;$('tcTotal').textContent=d.total;if($('tcMembers'))$('tcMembers').textContent=d.members;}}}}catch(e){{}}
@@ -947,14 +549,12 @@ async function loadTrafficCounter(){{
 async function loadOnlineUsers(){{
   try{{const d=await api('/api/online');if(d.ok){{onlineUsers=new Set(d.online);if($('dmConvList'))loadDMConversations();}}}}catch(e){{}}
 }}
-
 // ── SEARCH ────────────────────────────────────────────────────────────────
 function homeRunSearch(){{
   const q=$('homeSearchInput');if(!q)return;
   const query=q.value.trim();if(!query)return;
   window.open('https://www.google.com/search?q='+encodeURIComponent(query),'_blank','noopener,noreferrer');
 }}
-
 // ── MESSAGING ─────────────────────────────────────────────────────────────
 function renderBubbles(messages,me,container){{
   if(!messages||!messages.length){{container.innerHTML='<div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">NO MESSAGES YET</div>';return}}
@@ -965,7 +565,6 @@ function renderBubbles(messages,me,container){{
     <div class="bubble-meta">${{mine?'YOU':m.sender}} &middot; ${{m.timestamp}}</div></div></div>`}}).join('');
   if(atBottom||container.scrollTop===0)container.scrollTop=container.scrollHeight;
 }}
-
 // ── DM ────────────────────────────────────────────────────────────────────
 async function dmUserSearch(){{
   const q=$('newDmUser').value.trim(),box=$('dmUserSuggest');
@@ -1014,7 +613,6 @@ async function sendDM(){{
   if(!d.ok){{alert('ERROR: '+d.error);return}}
   loadDMThread(activeDMUser,true);
 }}
-
 // ── GROUPS ────────────────────────────────────────────────────────────────
 async function loadGroups(){{
   const d=await api('/api/groups'),box=$('groupList');
@@ -1065,7 +663,6 @@ async function sendGroupMsg(){{
   $('groupInput').value='';await api('/api/groups/send',{{group_id:activeGroupId,content}});
   loadGroupThread(activeGroupId,activeGroupName,false);
 }}
-
 // ── PRIVATE ROOMS ─────────────────────────────────────────────────────────
 async function loadPrivateRooms(){{
   const box=$('privateRoomList');if(!box)return;
@@ -1153,7 +750,6 @@ async function renameChat(type,id){{
   if(type==='group'){{activeGroupName=newName.trim().toUpperCase();loadGroupThread(id,activeGroupName,true);}}
   else{{activePrivateRoomName=newName.trim().toUpperCase();loadPrivateThread(id,activePrivateRoomName,true);}}
 }}
-
 // ── TABS ──────────────────────────────────────────────────────────────────
 function switchTab(tab){{
   ['DM','Group','Private'].forEach(t=>{{$('tab'+t).classList.toggle('active',t.toLowerCase()===tab);$('tabContent'+t).classList.toggle('active',t.toLowerCase()===tab)}});
@@ -1161,7 +757,6 @@ function switchTab(tab){{
   else if(tab==='group')loadGroups();
   else if(tab==='private')loadPrivateRooms();
 }}
-
 // ── INIT ──────────────────────────────────────────────────────────────────
 loadTrafficCounter();setInterval(loadTrafficCounter,10000);
 requestNotifPermission();checkNotifications();setInterval(checkNotifications,8000);
@@ -1177,7 +772,6 @@ if($('dmConvList')){{
     if(activePrivateRoomId)loadPrivateThread(activePrivateRoomId,activePrivateRoomName,false);
   }},5000);
 }}
-
 // ── MATRIX RAIN ───────────────────────────────────────────────────────────
 (function(){{
   const c=document.createElement('canvas');
@@ -1201,162 +795,35 @@ if($('dmConvList')){{
   }},50);
 }})();
 </script></body></html>"""
-
 # ── ROUTES ────────────────────────────────────────────────────────────────────
-
 @app.route("/")
 def home():
     user  = session.get("username")
     theme = session.get("theme", "green")
-
     def _tile(i, l, h):
         if h.startswith("#"):
             mid = h[1:]
             cb  = f"openModal('{mid}');loadPosts();" if mid == "postModal" else f"openModal('{mid}');"
             return f'<a class="tile" onclick="{cb}" style="cursor:pointer;"><i class="fas {i}"></i><div>| {l} |</div></a>'
         return f'<a class="tile" href="{h}" target="_blank" rel="noopener noreferrer" style="cursor:pointer;"><i class="fas {i}"></i><div>| {l} |</div></a>'
-
     tiles = "".join(_tile(i, l, h) for i, l, h in NAV_ITEMS)
-
-    chat_panel = """<div class="command-wrapper" style="width:100%;margin-bottom:24px;box-sizing:border-box;">
-        <div style="padding:10px 14px;border:2px solid var(--p);border-radius:var(--r) var(--r) 0 0;background:var(--p10);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-            <span style="font-size:13px;letter-spacing:2px;">// CHAT //</span>
-            <span style="font-size:10px;opacity:.7;letter-spacing:1px;">[SYSTEM STATUS] [ACTIVE] &mdash; THE VOICE OF THE PEOPLE.</span>
-            <span style="font-size:9px;opacity:.4;">&#11041; FERNET-256 E2E ENCRYPTED &middot; AUTO-REFRESH 5s</span>
-        </div>
-        <div class="tab-bar" style="border-radius:0;">
-            <button class="tab active" id="tabDM" onclick="switchTab('dm')">DIRECT MSG <span id="badgeDM" style="display:none;background:var(--p);color:#000;border-radius:50%;padding:1px 5px;font-size:9px;margin-left:3px;"></span></button>
-            <button class="tab" id="tabGroup" onclick="switchTab('group')">GROUP CHANNELS <span id="badgeGroup" style="display:none;background:var(--p);color:#000;border-radius:50%;padding:1px 5px;font-size:9px;margin-left:3px;"></span></button>
-            <button class="tab" id="tabPrivate" onclick="switchTab('private')">&#128274; PRIVATE <span id="badgePrivate" style="display:none;background:var(--p);color:#000;border-radius:50%;padding:1px 5px;font-size:9px;margin-left:3px;"></span></button>
-        </div>
-        <div class="tab-content active" id="tabContentDM"><div class="comms-layout" style="border-top:none;">
-            <div class="comms-sidebar" id="dmSidebar">
-                <div class="comms-sidebar-header">CONVERSATIONS</div>
-                <div class="conv-list" id="dmConvList"><div style="padding:10px;font-size:11px;opacity:.4;">LOADING...</div></div>
-                <div class="sidebar-footer" style="position:relative;">
-                    <input class="field-plain" id="newDmUser" placeholder="&#128269; SEARCH USER..." type="text" style="margin:0;font-size:11px;padding:7px 10px;border-radius:20px;width:100%;box-sizing:border-box;" oninput="dmUserSearch()" onkeydown="if(event.key==='Escape')hideDmSuggest();" autocomplete="off">
-                    <div id="dmUserSuggest" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;right:0;background:#000;border:2px solid var(--p);border-radius:8px;box-shadow:0 0 20px var(--p30);z-index:9999;max-height:160px;overflow-y:auto;font-size:11px;"></div>
-                </div>
-            </div>
-            <div class="comms-main" id="dmMain">
-                <div class="comms-thread-header">
-                    <button class="mobile-back-btn send-btn" style="padding:6px 12px;font-size:11px;margin-right:8px;display:none;" onclick="mobileShowSidebar('dm')">&#9664; BACK</button>
-                    <span id="dmThreadTitle" style="flex:1;">SELECT A CONVERSATION</span>
-                </div>
-                <div class="comms-messages" id="dmMessages"><div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">SELECT A CONVERSATION</div></div>
-                <div class="comms-compose" id="dmCompose" style="display:none;">
-                    <input type="text" id="dmInput" placeholder="MESSAGE..." onkeydown="if(event.key==='Enter')sendDM()">
-                    <button class="send-btn" onclick="sendDM()">&#9658;</button>
-                </div>
-            </div>
-        </div></div>
-        <div class="tab-content" id="tabContentGroup"><div class="comms-layout" style="border-top:none;">
-            <div class="comms-sidebar" id="groupSidebar">
-                <div class="comms-sidebar-header">CHANNELS</div>
-                <div class="conv-list" id="groupList"><div style="padding:10px;font-size:11px;opacity:.4;">LOADING...</div></div>
-                <div class="sidebar-footer" id="groupCreateFooter" style="display:none;">
-                    <input class="field-plain" id="newGroupName" placeholder="CHANNEL NAME" type="text" style="margin:0;font-size:11px;padding:7px;border-radius:20px;" onkeydown="if(event.key==='Enter')createGroup()">
-                    <button class="btn-action" style="margin-top:6px;padding:5px 8px;font-size:10px;width:100%;" onclick="createGroup()">+ CREATE</button>
-                </div>
-            </div>
-            <div class="comms-main" id="groupMain">
-                <div class="comms-thread-header">
-                    <button class="mobile-back-btn send-btn" style="padding:6px 12px;font-size:11px;margin-right:8px;display:none;" onclick="mobileShowSidebar('group')">&#9664; BACK</button>
-                    <span id="groupThreadTitle" style="flex:1;">SELECT A CHANNEL</span>
-                    <button class="send-btn" id="joinLeaveBtn" style="display:none;font-size:10px;padding:5px 12px;"></button>
-                </div>
-                <div class="comms-messages" id="groupMessages"><div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">SELECT A CHANNEL</div></div>
-                <div class="comms-compose" id="groupCompose" style="display:none;">
-                    <input type="text" id="groupInput" placeholder="BROADCAST..." onkeydown="if(event.key==='Enter')sendGroupMsg()">
-                    <button class="send-btn" onclick="sendGroupMsg()">&#9658;</button>
-                </div>
-            </div>
-        </div></div>
-        <div class="tab-content" id="tabContentPrivate"><div class="comms-layout" style="border-top:none;">
-            <div class="comms-sidebar" id="privateSidebar">
-                <div class="comms-sidebar-header">PRIVATE ROOMS</div>
-                <div class="conv-list" id="privateRoomList"><div style="padding:10px;font-size:11px;opacity:.4;">LOADING...</div></div>
-                <div class="sidebar-footer" id="privateAdminFooter" style="display:none;">
-                    <input class="field-plain" id="newRoomName" placeholder="ROOM NAME" type="text" style="margin:0;font-size:11px;padding:7px;border-radius:20px;" onkeydown="if(event.key==='Enter')createPrivateRoom()">
-                    <button class="btn-action" style="margin-top:6px;padding:5px 8px;font-size:10px;width:100%;" onclick="createPrivateRoom()">+ CREATE ROOM</button>
-                </div>
-            </div>
-            <div class="comms-main" id="privateMain">
-                <div class="comms-thread-header">
-                    <button class="mobile-back-btn send-btn" style="padding:6px 12px;font-size:11px;margin-right:8px;display:none;" onclick="mobileShowSidebar('private')">&#9664; BACK</button>
-                    <span id="privateRoomTitle" style="flex:1;">SELECT A ROOM</span>
-                    <button id="privateMembersBtn" style="display:none;background:none;border:1px solid var(--p);border-radius:6px;color:var(--p);cursor:pointer;font-size:10px;padding:3px 10px;font-family:'Courier New',monospace;" onclick="showPrivateMembers()">&#128100; MEMBERS</button>
-                </div>
-                <div class="comms-messages" id="privateMessages"><div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">SELECT A ROOM</div></div>
-                <div class="comms-compose" id="privateCompose" style="display:none;">
-                    <input type="text" id="privateInput" placeholder="MESSAGE..." onkeydown="if(event.key==='Enter')sendPrivateMsg()">
-                    <button class="send-btn" onclick="sendPrivateMsg()">&#9658;</button>
-                </div>
-            </div>
-        </div></div>
-    </div>""" if user else ""
-
-    search_bar = """<div class="search-box" style="width:100%;margin:0 0 24px;"><div class="search-row">
-        <input class="search-input" id="homeSearchInput" placeholder="&#128270; GOOGLE SEARCH..." type="text" onkeydown="if(event.key==='Enter')homeRunSearch()">
-        <button class="search-btn" onclick="homeRunSearch()">&#128270; SEARCH</button>
-    </div></div>""" if user else ""
-
-    install_banner = """<div id="installBanner" style="display:block;width:100%;margin:0 0 16px;box-sizing:border-box;">
-        <div style="border:2px solid var(--p);border-radius:var(--r);padding:10px 16px;background:var(--p10);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-            <span style="font-size:11px;letter-spacing:1px;">&#128242; INSTALL VOX APP &mdash; ACCESS FROM YOUR HOME SCREEN</span>
-            <button id="enableNotifBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="enableNotifications()">&#128276; ENABLE NOTIFICATIONS</button>
-            <div style="display:flex;gap:8px;align-items:center;">
-                <button id="installBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="triggerInstall()">&#11015; INSTALL</button>
-                <button onclick="document.getElementById('installBanner').style.display='none';localStorage.setItem('voxInstallDismissed','1')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:14px;padding:2px 6px;">&#10006;</button>
-            </div>
-        </div>
-        <div id="iosInstallMsg" style="display:none;border:1px solid var(--p30);border-top:none;border-radius:0 0 var(--r) var(--r);padding:8px 16px;font-size:10px;opacity:.7;letter-spacing:1px;">
-            &#63743; ON IOS: TAP THE SHARE BUTTON THEN &ldquo;ADD TO HOME SCREEN&rdquo;
-        </div>
-    </div>
-    <script>
-    let _installPrompt=null;
-    window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();_installPrompt=e;if(!localStorage.getItem('voxInstallDismissed')){const b=document.getElementById('installBanner');if(b)b.style.display='block';}});
-    window.addEventListener('appinstalled',()=>{const b=document.getElementById('installBanner');if(b)b.style.display='none';localStorage.setItem('voxInstallDismissed','1');});
-    if(typeof Notification!=='undefined'&&Notification.permission!=='granted'&&Notification.permission!=='denied'){const btn=document.getElementById('enableNotifBtn');if(btn)btn.style.display='inline-block';}
-    if(typeof Notification!=='undefined'&&Notification.permission==='granted'){const m=document.getElementById('notifMenuItem');if(m)m.style.display='none';}
-    function triggerInstall(){if(_installPrompt){_installPrompt.prompt();_installPrompt.userChoice.then(r=>{if(r.outcome==='accepted')localStorage.setItem('voxInstallDismissed','1');_installPrompt=null;});}}
-    const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;
-    const isStandalone=window.navigator.standalone===true||window.matchMedia('(display-mode: standalone)').matches;
-    if(!isStandalone&&!localStorage.getItem('voxInstallDismissed')){const b=document.getElementById('installBanner');if(b)b.style.display='block';}
-    if(isIOS&&!isStandalone&&!localStorage.getItem('voxInstallDismissed')){const b=document.getElementById('installBanner');const ios=document.getElementById('iosInstallMsg');const btn=document.getElementById('installBtn');if(b)b.style.display='block';if(ios)ios.style.display='block';if(btn)btn.style.display='none';}
-    </script>""" if user else ""
-
-    news_panel = """<div class="command-wrapper" style="width:100%;margin-bottom:24px;box-sizing:border-box;">
-        <div style="padding:10px 14px;border:2px solid var(--p);border-radius:var(--r) var(--r) 0 0;background:var(--p10);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-            <span style="font-size:13px;letter-spacing:2px;">// LIVE NEWS //</span>
-            <span id="newsFeedStatus" style="font-size:9px;opacity:.4;letter-spacing:1px;">LOADING...</span>
-        </div>
-        <div style="display:flex;border-left:2px solid var(--p);border-right:2px solid var(--p);">
-            <button id="newsTabWorld"   onclick="switchNewsTab('world')"   style="flex:1;padding:6px 2px;background:var(--p);color:#000;border:none;border-bottom:2px solid var(--p);font-family:'Courier New',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127760; WORLD</button>
-            <button id="newsTabUS"      onclick="switchNewsTab('usnews')"  style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:'Courier New',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127482;&#127480; US NEWS</button>
-            <button id="newsTabEpstein" onclick="switchNewsTab('epstein')" style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:'Courier New',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#128269; EPSTEIN</button>
-        </div>
-        <div id="newsFeed" style="border:2px solid var(--p);border-top:none;border-radius:0 0 var(--r) var(--r);max-height:320px;overflow-y:auto;">
-            <div style="padding:16px;opacity:.4;text-align:center;font-size:11px;">&#128256; FETCHING NEWS...</div>
-        </div>
-    </div>""" if user else ""
-
-    content = f"""<div class="command-wrapper">
-        <div style="text-align:center;width:100%;"><div class="tile-grid">{tiles}</div></div>
-        {install_banner}{search_bar}{chat_panel}{news_panel}
-        <div class="content-box">The system is broken! We rely on big corporations to supply us — that's why they can inflate prices!<br><br>We build the future we want to live in by growing our own food and bartering. Buy local, sell local!</div>
-        <div class="content-box">If you have landed here, you are wondering if there is a different way to live. We will show you exactly how, step by step.</div>
-        <div class="three-column-grid">
-            <div class="column"><h3>THE TRUTH</h3><p>Wealth gap and corporate reliance truth.</p><a class="btn-action" href="https://www.youtube.com/watch?v=pb0OCI9qwIU" target="_blank" rel="noopener noreferrer">&#9658; WATCH</a></div>
-            <div class="column"><h3>ORGANIZE</h3><p>Grow food, barter, and rebuild community.</p><a class="btn-action" href="https://www.youtube.com/watch?v=shIfzNOcNvs" target="_blank" rel="noopener noreferrer">&#9658; LEARN</a></div>
-            <div class="column"><h3>COMMUNITY</h3><p>Join our TikTok community and say hello!</p><a class="btn-action" href="#" target="_blank" rel="noopener noreferrer">&#9658; ACCESS</a></div>
-        </div>
-        <iframe class="top-video" src="https://www.youtube.com/embed/Ee_uujKuJMI?loop=1&playlist=Ee_uujKuJMI" frameborder="0" allow="encrypted-media" allowfullscreen></iframe></div>"""
+    _bdg = lambda i: f'<span id="{i}" style="display:none;background:var(--p);color:#000;border-radius:50%;padding:1px 5px;font-size:9px;margin-left:3px;"></span>'
+    _chat_tabs = f'<div class="tab-bar" style="border-left:2px solid var(--p);border-right:2px solid var(--p);"><button class="tab active" id="tabDM" onclick="switchTab(\'dm\')">DIRECT MSG {_bdg("badgeDM")}</button><button class="tab" id="tabGroup" onclick="switchTab(\'group\')">GROUP CHANNELS {_bdg("badgeGroup")}</button><button class="tab" id="tabPrivate" onclick="switchTab(\'private\')">&#128274; PRIVATE {_bdg("badgePrivate")}</button></div>'
+    _dm_tab = '<div class="tab-content active" id="tabContentDM"><div class="comms-layout" style="border-top:none;"><div class="comms-sidebar" id="dmSidebar"><div class="comms-sidebar-header">CONVERSATIONS</div><div class="conv-list" id="dmConvList"><div style="padding:10px;font-size:11px;opacity:.4;">LOADING...</div></div><div class="sidebar-footer" style="position:relative;"><input class="field-plain" id="newDmUser" placeholder="&#128269; SEARCH USER..." type="text" style="margin:0;font-size:11px;padding:7px 10px;border-radius:20px;width:100%;box-sizing:border-box;" oninput="dmUserSearch()" onkeydown="if(event.key===\'Escape\')hideDmSuggest();" autocomplete="off"><div id="dmUserSuggest" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;right:0;background:#000;border:2px solid var(--p);border-radius:8px;box-shadow:0 0 20px var(--p30);z-index:9999;max-height:160px;overflow-y:auto;font-size:11px;"></div></div></div><div class="comms-main" id="dmMain"><div class="comms-thread-header"><button class="mobile-back-btn send-btn" style="padding:6px 12px;font-size:11px;margin-right:8px;display:none;" onclick="mobileShowSidebar(\'dm\')">&#9664; BACK</button><span id="dmThreadTitle" style="flex:1;">SELECT A CONVERSATION</span></div><div class="comms-messages" id="dmMessages"><div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">SELECT A CONVERSATION</div></div><div class="comms-compose" id="dmCompose" style="display:none;"><input type="text" id="dmInput" placeholder="MESSAGE..." onkeydown="if(event.key===\'Enter\')sendDM()"><button class="send-btn" onclick="sendDM()">&#9658;</button></div></div></div></div>'
+    _grp_tab = '<div class="tab-content" id="tabContentGroup"><div class="comms-layout" style="border-top:none;"><div class="comms-sidebar" id="groupSidebar"><div class="comms-sidebar-header">CHANNELS</div><div class="conv-list" id="groupList"><div style="padding:10px;font-size:11px;opacity:.4;">LOADING...</div></div><div class="sidebar-footer" id="groupCreateFooter" style="display:none;"><input class="field-plain" id="newGroupName" placeholder="CHANNEL NAME" type="text" style="margin:0;font-size:11px;padding:7px;border-radius:20px;" onkeydown="if(event.key===\'Enter\')createGroup()"><button class="btn-action" style="margin-top:6px;padding:5px 8px;font-size:10px;width:100%;" onclick="createGroup()">+ CREATE</button></div></div><div class="comms-main" id="groupMain"><div class="comms-thread-header"><button class="mobile-back-btn send-btn" style="padding:6px 12px;font-size:11px;margin-right:8px;display:none;" onclick="mobileShowSidebar(\'group\')">&#9664; BACK</button><span id="groupThreadTitle" style="flex:1;">SELECT A CHANNEL</span><button class="send-btn" id="joinLeaveBtn" style="display:none;font-size:10px;padding:5px 12px;"></button></div><div class="comms-messages" id="groupMessages"><div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">SELECT A CHANNEL</div></div><div class="comms-compose" id="groupCompose" style="display:none;"><input type="text" id="groupInput" placeholder="BROADCAST..." onkeydown="if(event.key===\'Enter\')sendGroupMsg()"><button class="send-btn" onclick="sendGroupMsg()">&#9658;</button></div></div></div></div>'
+    _prv_tab = '<div class="tab-content" id="tabContentPrivate"><div class="comms-layout" style="border-top:none;"><div class="comms-sidebar" id="privateSidebar"><div class="comms-sidebar-header">PRIVATE ROOMS</div><div class="conv-list" id="privateRoomList"><div style="padding:10px;font-size:11px;opacity:.4;">LOADING...</div></div><div class="sidebar-footer" id="privateAdminFooter" style="display:none;"><input class="field-plain" id="newRoomName" placeholder="ROOM NAME" type="text" style="margin:0;font-size:11px;padding:7px;border-radius:20px;" onkeydown="if(event.key===\'Enter\')createPrivateRoom()"><button class="btn-action" style="margin-top:6px;padding:5px 8px;font-size:10px;width:100%;" onclick="createPrivateRoom()">+ CREATE ROOM</button></div></div><div class="comms-main" id="privateMain"><div class="comms-thread-header"><button class="mobile-back-btn send-btn" style="padding:6px 12px;font-size:11px;margin-right:8px;display:none;" onclick="mobileShowSidebar(\'private\')">&#9664; BACK</button><span id="privateRoomTitle" style="flex:1;">SELECT A ROOM</span><button id="privateMembersBtn" style="display:none;background:none;border:1px solid var(--p);border-radius:6px;color:var(--p);cursor:pointer;font-size:10px;padding:3px 10px;font-family:\'Courier New\',monospace;" onclick="showPrivateMembers()">&#128100; MEMBERS</button></div><div class="comms-messages" id="privateMessages"><div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">SELECT A ROOM</div></div><div class="comms-compose" id="privateCompose" style="display:none;"><input type="text" id="privateInput" placeholder="MESSAGE..." onkeydown="if(event.key===\'Enter\')sendPrivateMsg()"><button class="send-btn" onclick="sendPrivateMsg()">&#9658;</button></div></div></div></div>'
+    _chat_title_right = '<span style="font-size:10px;opacity:.7;letter-spacing:1px;">[SYSTEM STATUS] [ACTIVE] &mdash; THE VOICE OF THE PEOPLE.</span><span style="font-size:9px;opacity:.4;">&#11041; FERNET-256 E2E ENCRYPTED &middot; AUTO-REFRESH 5s</span>'
+    chat_panel = cyber_box("// CHAT //", _dm_tab+_grp_tab+_prv_tab, title_right=_chat_title_right, extra_header=_chat_tabs, body_style="border-top:none;", border_top=False) if user else ""
+    search_bar = '<div class="search-box" style="width:100%;margin:0 0 24px;"><div class="search-row"><input class="search-input" id="homeSearchInput" placeholder="&#128270; GOOGLE SEARCH..." type="text" onkeydown="if(event.key===\'Enter\')homeRunSearch()"><button class="search-btn" onclick="homeRunSearch()">&#128270; SEARCH</button></div></div>' if user else ""
+    install_banner = ('<div id="installBanner" style="display:block;width:100%;margin:0 0 16px;box-sizing:border-box;"><div style="border:2px solid var(--p);border-radius:var(--r);padding:10px 16px;background:var(--p10);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;"><span style="font-size:11px;letter-spacing:1px;">&#128242; INSTALL VOX APP &mdash; ACCESS FROM YOUR HOME SCREEN</span><button id="enableNotifBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="enableNotifications()">&#128276; ENABLE NOTIFICATIONS</button><div style="display:flex;gap:8px;align-items:center;"><button id="installBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="triggerInstall()">&#11015; INSTALL</button><button onclick="document.getElementById(\'installBanner\').style.display=\'none\';localStorage.setItem(\'voxInstallDismissed\',\'1\')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:14px;padding:2px 6px;">&#10006;</button></div></div><div id="iosInstallMsg" style="display:none;border:1px solid var(--p30);border-top:none;border-radius:0 0 var(--r) var(--r);padding:8px 16px;font-size:10px;opacity:.7;letter-spacing:1px;">&#63743; ON IOS: TAP THE SHARE BUTTON THEN &ldquo;ADD TO HOME SCREEN&rdquo;</div></div>'
+        '<script>let _installPrompt=null;window.addEventListener(\'beforeinstallprompt\',e=>{e.preventDefault();_installPrompt=e;if(!localStorage.getItem(\'voxInstallDismissed\')){const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'block\';}});window.addEventListener(\'appinstalled\',()=>{const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'none\';localStorage.setItem(\'voxInstallDismissed\',\'1\');});if(typeof Notification!==\'undefined\'&&Notification.permission!==\'granted\'&&Notification.permission!==\'denied\'){const btn=document.getElementById(\'enableNotifBtn\');if(btn)btn.style.display=\'inline-block\';}if(typeof Notification!==\'undefined\'&&Notification.permission===\'granted\'){const m=document.getElementById(\'notifMenuItem\');if(m)m.style.display=\'none\';}function triggerInstall(){if(_installPrompt){_installPrompt.prompt();_installPrompt.userChoice.then(r=>{if(r.outcome===\'accepted\')localStorage.setItem(\'voxInstallDismissed\',\'1\');_installPrompt=null;});}}const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;const isStandalone=window.navigator.standalone===true||window.matchMedia(\'(display-mode: standalone)\').matches;if(!isStandalone&&!localStorage.getItem(\'voxInstallDismissed\')){const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'block\';}if(isIOS&&!isStandalone&&!localStorage.getItem(\'voxInstallDismissed\')){const b=document.getElementById(\'installBanner\');const ios=document.getElementById(\'iosInstallMsg\');const btn=document.getElementById(\'installBtn\');if(b)b.style.display=\'block\';if(ios)ios.style.display=\'block\';if(btn)btn.style.display=\'none\';}</script>') if user else ""
+    _news_tabs = '<div style="display:flex;border-left:2px solid var(--p);border-right:2px solid var(--p);"><button id="newsTabWorld" onclick="switchNewsTab(\'world\')" style="flex:1;padding:6px 2px;background:var(--p);color:#000;border:none;border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127760; WORLD</button><button id="newsTabUS" onclick="switchNewsTab(\'usnews\')" style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127482;&#127480; US NEWS</button><button id="newsTabEpstein" onclick="switchNewsTab(\'epstein\')" style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#128269; EPSTEIN</button></div>'
+    _news_body = '<div id="newsFeed" style="padding:16px;opacity:.4;text-align:center;font-size:11px;">&#128256; FETCHING NEWS...</div>'
+    _news_title_right = '<span id="newsFeedStatus" style="font-size:9px;opacity:.4;letter-spacing:1px;">LOADING...</span>'
+    news_panel = cyber_box("// LIVE NEWS //", _news_body, title_right=_news_title_right, extra_header=_news_tabs, max_h="320px", border_top=False) if user else ""
+    content = (f'<div class="command-wrapper"><div style="text-align:center;width:100%;"><div class="tile-grid">{tiles}</div></div>{install_banner}{search_bar}{chat_panel}{news_panel}<div class="content-box">The system is broken! We rely on big corporations to supply us — that\'s why they can inflate prices!<br><br>We build the future we want to live in by growing our own food and bartering. Buy local, sell local!</div><div class="content-box">If you have landed here, you are wondering if there is a different way to live. We will show you exactly how, step by step.</div><div class="three-column-grid"><div class="column"><h3>THE TRUTH</h3><p>Wealth gap and corporate reliance truth.</p><a class="btn-action" href="https://www.youtube.com/watch?v=pb0OCI9qwIU" target="_blank" rel="noopener noreferrer">&#9658; WATCH</a></div><div class="column"><h3>ORGANIZE</h3><p>Grow food, barter, and rebuild community.</p><a class="btn-action" href="https://www.youtube.com/watch?v=shIfzNOcNvs" target="_blank" rel="noopener noreferrer">&#9658; LEARN</a></div><div class="column"><h3>COMMUNITY</h3><p>Join our TikTok community and say hello!</p><a class="btn-action" href="#" target="_blank" rel="noopener noreferrer">&#9658; ACCESS</a></div></div><iframe class="top-video" src="https://www.youtube.com/embed/Ee_uujKuJMI?loop=1&playlist=Ee_uujKuJMI" frameborder="0" allow="encrypted-media" allowfullscreen></iframe></div>')
     return shell(content, user=user, theme=theme)
-
 # ── AUTH ──────────────────────────────────────────────────────────────────────
-
 @app.route("/api/register", methods=["POST"])
 def api_register():
     d = request.json
@@ -1375,7 +842,6 @@ def api_register():
         return ok()
     except sqlite3.IntegrityError:
         return err("USERNAME TAKEN")
-
 @app.route("/api/login", methods=["POST"])
 def api_login():
     d = request.json
@@ -1388,11 +854,9 @@ def api_login():
                 con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, u))
     session["username"] = u; session["theme"] = row[1]; session.permanent = True
     return ok()
-
 @app.route("/logout")
 def logout():
     session.clear(); return redirect("/")
-
 @app.route("/api/theme", methods=["POST"])
 def api_theme():
     if e := require_login(): return e
@@ -1400,7 +864,6 @@ def api_theme():
     if t not in THEMES: return err("INVALID THEME")
     with db() as con: con.execute("UPDATE users SET theme=? WHERE username=?", (t, me()))
     session["theme"] = t; return ok()
-
 @app.route("/api/change-password", methods=["POST"])
 def api_change_password():
     if e := require_login(): return e
@@ -1413,7 +876,6 @@ def api_change_password():
         if not row or row[0] != hash_pw(cur_pw): return err("CURRENT PASSWORD INCORRECT")
         con.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_pw(new_pw), me()))
     return ok()
-
 @app.route("/api/users/search")
 def api_user_search():
     q = request.args.get("q","").strip()
@@ -1421,9 +883,7 @@ def api_user_search():
     with db() as con:
         rows = con.execute("SELECT username FROM users WHERE username LIKE ? LIMIT 10", (f"%{q}%",)).fetchall()
     return ok(users=[r[0] for r in rows])
-
 # ── POSTS ─────────────────────────────────────────────────────────────────────
-
 @app.route("/api/posts")
 def api_posts():
     if e := require_login(): return e
@@ -1439,7 +899,6 @@ def api_posts():
     posts = [{"id": r[0], "username": r[1], "content": r[2], "created_at": r[3][:16],
               "reactions": rx.get(r[0], {}), "can_delete": is_admin(u) or r[1] == u} for r in rows]
     return ok(posts=posts, me=u)
-
 @app.route("/api/posts/create", methods=["POST"])
 def api_posts_create():
     if e := require_login(): return e
@@ -1449,7 +908,6 @@ def api_posts_create():
     with db() as con:
         con.execute("INSERT INTO posts(username,content) VALUES(?,?)", (me(), content))
     return ok()
-
 @app.route("/api/posts/react", methods=["POST"])
 def api_posts_react():
     if e := require_login(): return e
@@ -1465,7 +923,6 @@ def api_posts_react():
         else:
             con.execute("INSERT INTO post_reactions(post_id,username,emoji) VALUES(?,?,?)", (post_id, u, emoji))
     return ok()
-
 @app.route("/api/posts/delete", methods=["POST"])
 def api_posts_delete():
     if e := require_login(): return e
@@ -1478,16 +935,13 @@ def api_posts_delete():
         con.execute("DELETE FROM post_reactions WHERE post_id=?", (post_id,))
         con.execute("DELETE FROM posts WHERE id=?", (post_id,))
     return ok()
-
 # ── ADMIN ─────────────────────────────────────────────────────────────────────
-
 @app.route("/api/admin/users")
 def api_admin_users():
     if e := require_admin(): return e
     with db() as con:
         rows = con.execute("SELECT username,is_admin,created_at FROM users ORDER BY is_admin DESC,created_at ASC").fetchall()
     return ok(users=[{"username": r[0], "is_admin": bool(r[1]), "created_at": r[2]} for r in rows])
-
 @app.route("/api/admin/set-admin", methods=["POST"])
 def api_admin_set():
     if e := require_admin(): return e
@@ -1496,7 +950,6 @@ def api_admin_set():
     if target == ADMIN_USER: return err("CANNOT MODIFY ROOT ADMIN")
     with db() as con: con.execute("UPDATE users SET is_admin=? WHERE username=?", (1 if grant else 0, target))
     return ok()
-
 @app.route("/api/admin/remove-user", methods=["POST"])
 def api_admin_remove_user():
     if e := require_admin(): return e
@@ -1510,20 +963,17 @@ def api_admin_remove_user():
             ("DELETE FROM users WHERE username=?",                       (target,)),
         ]: con.execute(q, a)
     return ok()
-
 @app.route("/api/admin/dm-log")
 def api_admin_dm_log():
     if e := require_admin(): return e
     with db() as con:
         rows = con.execute("SELECT id,sender,recipient,content_enc,timestamp FROM messages ORDER BY timestamp DESC LIMIT 200").fetchall()
     return ok(messages=[{"id": r[0], "sender": r[1], "recipient": r[2], "content": dec(r[3]), "timestamp": r[4]} for r in rows])
-
 @app.route("/api/admin/delete-dm", methods=["POST"])
 def api_admin_delete_dm():
     if e := require_admin(): return e
     with db() as con: con.execute("DELETE FROM messages WHERE id=?", (request.json.get("id"),))
     return ok()
-
 @app.route("/api/admin/group-log")
 def api_admin_group_log():
     if e := require_admin(): return e
@@ -1533,7 +983,6 @@ def api_admin_group_log():
             "FROM group_messages gm JOIN groups g ON g.id=gm.group_id "
             "ORDER BY gm.timestamp DESC LIMIT 200").fetchall()
     return ok(messages=[{"id": r[0], "group_id": r[1], "group": r[2], "sender": r[3], "content": dec(r[4]), "timestamp": r[5]} for r in rows])
-
 @app.route("/api/admin/user-chat")
 def api_admin_user_chat():
     if e := require_admin(): return e
@@ -1550,7 +999,6 @@ def api_admin_user_chat():
         convos.setdefault(p, []).append({"id": r[0], "sender": r[1], "recipient": r[2], "content": dec(r[3]), "timestamp": r[4]})
     result = [{"partner": p, "messages": m} for p, m in convos.items()]
     return ok(username=username, conversations=result, total=sum(len(c["messages"]) for c in result))
-
 @app.route("/api/admin/delete-convo", methods=["POST"])
 def api_admin_delete_convo():
     if e := require_admin(): return e
@@ -1559,7 +1007,6 @@ def api_admin_delete_convo():
     with db() as con:
         con.execute("DELETE FROM messages WHERE (sender=? AND recipient=?) OR (sender=? AND recipient=?)", (u1, u2, u2, u1))
     return ok()
-
 @app.route("/api/admin/delete-channel", methods=["POST"])
 def api_admin_delete_channel():
     if e := require_admin(): return e
@@ -1571,20 +1018,17 @@ def api_admin_delete_channel():
                   "DELETE FROM groups WHERE id=?"]:
             con.execute(q, (gid,))
     return ok()
-
 @app.route("/api/admin/delete-group-msg", methods=["POST"])
 def api_admin_delete_group_msg():
     if e := require_admin(): return e
     with db() as con: con.execute("DELETE FROM group_messages WHERE id=?", (request.json.get("id"),))
     return ok()
-
 @app.route("/api/admin/lock-channel", methods=["POST"])
 def api_admin_lock_channel():
     if e := require_admin(): return e
     d = request.json
     with db() as con: con.execute("UPDATE groups SET locked=? WHERE id=?", (1 if d.get("lock") else 0, d.get("group_id")))
     return ok()
-
 @app.route("/api/admin/traffic")
 def api_admin_traffic():
     if e := require_admin(): return e
@@ -1593,7 +1037,6 @@ def api_admin_traffic():
         total = con.execute("SELECT COUNT(DISTINCT ip) FROM visits").fetchone()[0]
         today = con.execute("SELECT COUNT(*) FROM visits WHERE date=date('now')").fetchone()[0]
     return ok(days=[{"date": r[0], "visitors": r[1]} for r in rows], total=total, today=today)
-
 @app.route("/api/admin/reset-requests")
 def api_admin_reset_requests():
     if e := require_admin(): return e
@@ -1602,7 +1045,6 @@ def api_admin_reset_requests():
             "SELECT id,username,temp_password,status,requested_at FROM password_resets "
             "WHERE status='pending' ORDER BY requested_at DESC").fetchall()
     return ok(requests=[{"id": r[0], "username": r[1], "temp_password": r[2], "status": r[3], "requested_at": r[4]} for r in rows])
-
 @app.route("/api/admin/reset-approve", methods=["POST"])
 def api_admin_reset_approve():
     if e := require_admin(): return e
@@ -1616,7 +1058,6 @@ def api_admin_reset_approve():
         con.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_pw(temp_pw), row[0]))
         con.execute("UPDATE password_resets SET status='approved',temp_password=? WHERE id=?", (temp_pw, rid))
     return ok()
-
 @app.route("/api/admin/reset-deny", methods=["POST"])
 def api_admin_reset_deny():
     if e := require_admin(): return e
@@ -1624,9 +1065,7 @@ def api_admin_reset_deny():
     if not rid: return err("MISSING ID")
     with db() as con: con.execute("UPDATE password_resets SET status='denied' WHERE id=?", (rid,))
     return ok()
-
 # ── TRAFFIC ───────────────────────────────────────────────────────────────────
-
 @app.route("/api/traffic/public")
 def api_traffic_public():
     ip, now = get_ip(), utc_now()
@@ -1643,7 +1082,6 @@ def api_traffic_public():
         online  = con.execute("SELECT COUNT(*) FROM active_users").fetchone()[0]
         members = con.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     return ok(today=today, total=total, online=online, members=members)
-
 @app.route("/api/online")
 def api_online():
     if not logged_in(): return ok(online=[])
@@ -1651,9 +1089,7 @@ def api_online():
     with db() as con:
         rows = con.execute("SELECT username FROM user_sessions WHERE last_seen >= ?", (cutoff,)).fetchall()
     return ok(online=[r[0] for r in rows])
-
 # ── NEWS ──────────────────────────────────────────────────────────────────────
-
 @app.route("/api/news")
 def api_news():
     if e := require_login(): return e
@@ -1697,11 +1133,9 @@ def api_news():
             "Accept-Encoding": "identity", "Referer": "https://www.google.com/",
         })
         with urllib.request.urlopen(req, timeout=10) as r: return r.read().decode("utf-8", errors="replace")
-
     def tag(xml, t):
         m = re.search(r'<' + t + r'[^>]*>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</' + t + r'>', xml, re.DOTALL)
         return re.sub(r'<[^>]+>', '', _html.unescape(m.group(1))).strip() if m else ""
-
     items, seen = [], set()
     for feed_url, category in feeds:
         if len(items) >= 40: break
@@ -1721,9 +1155,7 @@ def api_news():
         except: continue
     random.shuffle(items)
     return ok(items=items[:40])
-
 # ── MESSAGING ─────────────────────────────────────────────────────────────────
-
 @app.route("/api/dm/conversations")
 def api_dm_conversations():
     if not logged_in(): return jsonify({"ok": False})
@@ -1739,7 +1171,6 @@ def api_dm_conversations():
                               (partner, u, read_at.get(partner, '1970-01-01'))).fetchone()[0]
             convos.append({"username": partner, "unread": cnt})
     return ok(conversations=convos)
-
 @app.route("/api/dm/thread")
 def api_dm_thread():
     if not logged_in(): return jsonify({"ok": False})
@@ -1752,7 +1183,6 @@ def api_dm_thread():
             "ORDER BY timestamp ASC LIMIT 100", (u, other, other, u)).fetchall()
         con.execute("UPDATE messages SET read=1 WHERE recipient=? AND sender=?", (u, other))
     return ok(me=u, messages=dec_messages(rows))
-
 @app.route("/api/dm/send", methods=["POST"])
 def api_dm_send():
     if e := require_login(): return e
@@ -1766,7 +1196,6 @@ def api_dm_send():
         con.execute("INSERT INTO messages(sender,recipient,content_enc) VALUES(?,?,?)", (u, to, enc(content)))
     send_push(to, f"DM from {u}", content[:80], tag="dm")
     return ok()
-
 @app.route("/api/dm/delete", methods=["POST"])
 def api_dm_delete():
     if e := require_login(): return e
@@ -1776,7 +1205,6 @@ def api_dm_delete():
     with db() as con:
         con.execute("DELETE FROM messages WHERE (sender=? AND recipient=?) OR (sender=? AND recipient=?)", (u,other,other,u))
     return ok()
-
 @app.route("/api/dm/block", methods=["POST"])
 def api_dm_block():
     if e := require_login(): return e
@@ -1787,16 +1215,13 @@ def api_dm_block():
         con.execute("INSERT OR IGNORE INTO dm_blocked(blocker,blocked) VALUES(?,?)", (u, other))
         con.execute("DELETE FROM messages WHERE (sender=? AND recipient=?) OR (sender=? AND recipient=?)", (u,other,other,u))
     return ok()
-
 @app.route("/api/dm/unblock", methods=["POST"])
 def api_dm_unblock():
     if e := require_login(): return e
     other = (request.json or {}).get("username","").strip()
     with db() as con: con.execute("DELETE FROM dm_blocked WHERE blocker=? AND blocked=?", (me(), other))
     return ok()
-
 # ── GROUPS ────────────────────────────────────────────────────────────────────
-
 @app.route("/api/groups")
 def api_groups():
     if not logged_in(): return jsonify({"ok": False})
@@ -1809,7 +1234,6 @@ def api_groups():
         unread  = {r[0]: unread_count(con, 'group_messages', 'group_id', r[0], u, rat.get(str(r[0]), '1970-01-01')) for r in rows}
     return ok(groups=[{"id": r[0], "name": r[1], "member": r[0] in members, "locked": bool(r[2]),
                        "banned": r[0] in banned, "unread": unread.get(r[0], 0)} for r in rows])
-
 @app.route("/api/groups/create", methods=["POST"])
 def api_group_create():
     if e := require_login(): return e
@@ -1825,7 +1249,6 @@ def api_group_create():
         return ok(id=gid)
     except sqlite3.IntegrityError:
         return err("CHANNEL NAME TAKEN")
-
 @app.route("/api/groups/<int:gid>/messages")
 def api_group_messages(gid):
     if not logged_in(): return jsonify({"ok": False})
@@ -1842,7 +1265,6 @@ def api_group_messages(gid):
     is_member = admin or (bool(member) and not bool(banned))
     return ok(me=u, member=is_member, locked=bool(group and group[0]), admin=admin, members=members_list,
               messages=dec_messages(rows))
-
 @app.route("/api/groups/send", methods=["POST"])
 def api_group_send():
     if e := require_login(): return e
@@ -1862,7 +1284,6 @@ def api_group_send():
     gname = gname[0] if gname else "GROUP"
     for member in members: send_push(member, f"#{gname}", f"{u}: {content[:60]}", tag=f"group-{gid}")
     return ok()
-
 @app.route("/api/groups/kick", methods=["POST"])
 def api_group_kick():
     if e := require_admin(): return e
@@ -1870,7 +1291,6 @@ def api_group_kick():
     if not gid or not target: return err("MISSING FIELDS")
     with db() as con: con.execute("DELETE FROM group_members WHERE group_id=? AND username=?", (gid, target))
     return ok()
-
 @app.route("/api/groups/ban", methods=["POST"])
 def api_group_ban():
     if e := require_admin(): return e
@@ -1880,7 +1300,6 @@ def api_group_ban():
         con.execute("DELETE FROM group_members WHERE group_id=? AND username=?", (gid, target))
         con.execute("INSERT OR IGNORE INTO group_banned(group_id,username) VALUES(?,?)", (gid, target))
     return ok()
-
 @app.route("/api/groups/unban", methods=["POST"])
 def api_group_unban():
     if e := require_admin(): return e
@@ -1889,19 +1308,16 @@ def api_group_unban():
         con.execute("DELETE FROM group_banned WHERE group_id=? AND username=?", (gid, target))
         con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, target))
     return ok()
-
 @app.route("/api/groups/join", methods=["POST"])
 def api_group_join():
     if not logged_in(): return jsonify({"ok": False})
     with db() as con: con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (request.json.get("group_id"), me()))
     return ok()
-
 @app.route("/api/groups/leave", methods=["POST"])
 def api_group_leave():
     if not logged_in(): return jsonify({"ok": False})
     with db() as con: con.execute("DELETE FROM group_members WHERE group_id=? AND username=?", (request.json.get("group_id"), me()))
     return ok()
-
 @app.route("/api/group/rename", methods=["POST"])
 def api_group_rename():
     if e := require_admin(): return e
@@ -1911,9 +1327,7 @@ def api_group_rename():
         with db() as con: con.execute("UPDATE groups SET name=? WHERE id=?", (name, gid))
         return ok()
     except: return err("NAME TAKEN")
-
 # ── PRIVATE ROOMS ─────────────────────────────────────────────────────────────
-
 @app.route("/api/private/rooms")
 def api_private_rooms():
     if e := require_login(): return e
@@ -1924,7 +1338,6 @@ def api_private_rooms():
         rat    = read_at_map(con, u, 'private')
         unread = {r[0]: unread_count(con, 'private_room_messages', 'room_id', r[0], u, rat.get(str(r[0]), '1970-01-01')) for r in rows}
     return ok(rooms=[{"id": r[0], "name": r[1], "unread": unread.get(r[0], 0)} for r in rows], is_admin=admin)
-
 @app.route("/api/private/create", methods=["POST"])
 def api_private_create():
     if e := require_admin(): return e
@@ -1936,7 +1349,6 @@ def api_private_create():
         rid = cur.lastrowid
         cur.execute("INSERT OR IGNORE INTO private_room_members(room_id,username) VALUES(?,?)", (rid, me()))
     return ok(id=rid)
-
 @app.route("/api/private/<int:rid>/messages")
 def api_private_messages(rid):
     if e := require_login(): return e
@@ -1946,7 +1358,6 @@ def api_private_messages(rid):
             return err("ACCESS DENIED")
         rows = con.execute("SELECT sender,content_enc,timestamp FROM private_room_messages WHERE room_id=? ORDER BY timestamp ASC LIMIT 100", (rid,)).fetchall()
     return ok(me=u, is_admin=admin, messages=dec_messages(rows))
-
 @app.route("/api/private/send", methods=["POST"])
 def api_private_send():
     if e := require_login(): return e
@@ -1963,14 +1374,12 @@ def api_private_send():
     rname = rname[0] if rname else "PRIVATE"
     for member in members: send_push(member, f"🔒 {rname}", f"{u}: {content[:60]}", tag=f"private-{rid}")
     return ok()
-
 @app.route("/api/private/<int:rid>/members")
 def api_private_members(rid):
     if e := require_admin(): return e
     with db() as con:
         rows = con.execute("SELECT username FROM private_room_members WHERE room_id=? ORDER BY username", (rid,)).fetchall()
     return ok(members=[r[0] for r in rows])
-
 @app.route("/api/private/add-member", methods=["POST"])
 def api_private_add_member():
     if e := require_admin(): return e
@@ -1980,7 +1389,6 @@ def api_private_add_member():
         if not con.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone(): return err("USER NOT FOUND")
         con.execute("INSERT OR IGNORE INTO private_room_members(room_id,username) VALUES(?,?)", (rid, username))
     return ok()
-
 @app.route("/api/private/remove-member", methods=["POST"])
 def api_private_remove_member():
     if e := require_admin(): return e
@@ -1988,7 +1396,6 @@ def api_private_remove_member():
     if not rid or not username: return err("MISSING FIELDS")
     with db() as con: con.execute("DELETE FROM private_room_members WHERE room_id=? AND username=?", (rid, username))
     return ok()
-
 @app.route("/api/private/rename", methods=["POST"])
 def api_private_rename():
     if e := require_admin(): return e
@@ -1996,9 +1403,7 @@ def api_private_rename():
     if not rid or not name: return err("MISSING FIELDS")
     with db() as con: con.execute("UPDATE private_rooms SET name=? WHERE id=?", (name, rid))
     return ok()
-
 # ── NOTIFICATIONS ─────────────────────────────────────────────────────────────
-
 @app.route("/api/notifications")
 def api_notifications():
     if e := require_login(): return e
@@ -2032,13 +1437,11 @@ def api_notifications():
         posts_read = con.execute("SELECT read_at FROM chat_read_at WHERE username=? AND chat_type='posts' AND chat_id='posts'", (u,)).fetchone()
         new_posts  = con.execute("SELECT COUNT(*) FROM posts WHERE username!=? AND created_at>?",
                                  (u, posts_read[0] if posts_read else '1970-01-01')).fetchone()[0]
-
     group_total = sum(v["count"] for v in groups_unread.values())
     priv_total  = sum(v["count"] for v in privrooms_unread.values())
     return ok(dm=dm_unread, groups=groups_unread, group=group_total,
               private_rooms=privrooms_unread, private=priv_total, posts=new_posts,
               total=dm_unread + group_total + priv_total + new_posts)
-
 @app.route("/api/mark-read", methods=["POST"])
 def api_mark_read():
     if e := require_login(): return e
@@ -2052,9 +1455,7 @@ def api_mark_read():
         if chat_type == "dm":
             con.execute("UPDATE messages SET read=1 WHERE recipient=? AND sender=?", (me(), chat_id))
     return ok()
-
 # ── PASSWORD RESET ────────────────────────────────────────────────────────────
-
 @app.route("/api/reset/request", methods=["POST"])
 def api_reset_request():
     username = (request.json or {}).get("username","").strip()
@@ -2064,13 +1465,10 @@ def api_reset_request():
         if con.execute("SELECT id FROM password_resets WHERE username=? AND status='pending'", (username,)).fetchone(): return ok()
         con.execute("INSERT INTO password_resets(username) VALUES(?)", (username,))
     return ok()
-
 # ── PUSH ──────────────────────────────────────────────────────────────────────
-
 @app.route("/api/push/vapid-public-key")
 def api_vapid_public_key():
     return ok(key=VAPID_PUBLIC_KEY)
-
 @app.route("/api/push/subscribe", methods=["POST"])
 def api_push_subscribe():
     if e := require_login(): return e
@@ -2081,7 +1479,6 @@ def api_push_subscribe():
         con.execute("INSERT OR REPLACE INTO push_subscriptions(username,endpoint,p256dh,auth) VALUES(?,?,?,?)",
                     (me(), endpoint, p256dh, auth))
     return ok()
-
 @app.route("/api/push/unsubscribe", methods=["POST"])
 def api_push_unsubscribe():
     if e := require_login(): return e
@@ -2089,9 +1486,7 @@ def api_push_unsubscribe():
     if endpoint:
         with db() as con: con.execute("DELETE FROM push_subscriptions WHERE username=? AND endpoint=?", (me(), endpoint))
     return ok()
-
 # ── MISC ROUTES ───────────────────────────────────────────────────────────────
-
 @app.route("/api/ask", methods=["POST"])
 def api_ask():
     if e := require_login(): return e
@@ -2110,7 +1505,6 @@ def api_ask():
         return ok(answer=data["candidates"][0]["content"]["parts"][0]["text"].strip())
     except:
         return ok(answer="")
-
 @app.route("/manifest.json")
 def manifest():
     data = {"name": "Vox Populi", "short_name": "VOX", "description": "Vox Populi Community",
@@ -2121,7 +1515,6 @@ def manifest():
             "categories": ["social", "news"],
             "shortcuts": [{"name": "Chat", "url": "/", "description": "Open Vox community chat"}]}
     return Response(_json.dumps(data), mimetype="application/json")
-
 @app.route("/sw.js")
 def service_worker():
     sw = """const CACHE='vox-v1';
@@ -2131,7 +1524,6 @@ self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;if(e.reques
 self.addEventListener('push',e=>{let data={title:'VOX',body:'New notification',tag:'vox'};try{data=e.data.json();}catch(err){}e.waitUntil(self.registration.showNotification('VOX // '+data.title,{body:data.body,icon:'/icon-192.png',badge:'/icon-192.png',tag:data.tag,renotify:true,vibrate:[200,100,200],data:{url:'/'}}));});
 self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(self.location.origin)){c.focus();return;}}clients.openWindow('/');}));});"""
     return Response(sw, mimetype="application/javascript")
-
 def _svg_icon(size, text_y, font_size, sub_y=None, sub_text=None):
     txt = f'<text x="{size//2}" y="{text_y}" text-anchor="middle" font-family="monospace" font-weight="900" font-size="{font_size}" fill="#00ff00" letter-spacing="2">VOX</text>'
     sub = f'<text x="{size//2}" y="{sub_y}" text-anchor="middle" font-family="monospace" font-size="{font_size//4}" fill="#00ff00" opacity="0.6" letter-spacing="6">{sub_text}</text>' if sub_text else ''
@@ -2142,25 +1534,20 @@ def _svg_icon(size, text_y, font_size, sub_y=None, sub_text=None):
         return Response(cairosvg.svg2png(bytestring=svg, output_width=size, output_height=size), mimetype="image/png")
     except:
         return Response(svg, mimetype="image/svg+xml")
-
 @app.route("/icon-192.png")
 def icon_192(): return _svg_icon(192, 108, 34)
-
 @app.route("/icon-512.png")
 def icon_512(): return _svg_icon(512, 285, 90, sub_y=325, sub_text="VOX POPULI")
-
 @app.route("/reset-x7k9m2p4q8w3n6j1vb5")
 def emergency_reset():
     new_pw = "Vox2024!"
     with db() as con:
         con.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_pw(new_pw), ADMIN_USER))
     return "<h1 style='font-family:monospace;background:#000;color:#0f0;padding:40px;'>DONE! Login: Eagleone / Vox2024! — CHANGE YOUR PASSWORD AFTER LOGGING IN.</h1>"
-
 @app.errorhandler(Exception)
 def handle_exception(e):
     import traceback
     app.logger.error(traceback.format_exc())
     return f"<pre style='background:#111;color:#f44;padding:20px;font-size:12px;'>ERROR:\n{traceback.format_exc()}</pre>", 500
-
 if __name__ == "__main__":
     app.run(debug=False)
