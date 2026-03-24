@@ -1507,8 +1507,8 @@ def api_admin_remove_user():
         for q, a in [
             ("DELETE FROM messages WHERE sender=? OR recipient=?",       (target, target)),
             ("DELETE FROM group_messages WHERE sender=?",                (target,)),
-            ("DELETE FROM group_members WHERE username=?",               (target,)),
-            ("DELETE FROM users WHERE username=?",                       (target,)),
+            ("DELETE FROM group_members WHERE username=%s",               (target,)),
+            ("DELETE FROM users WHERE username=%s",                       (target,)),
         ]: con.execute(q, a)
     return ok()
 
@@ -1614,7 +1614,7 @@ def api_admin_reset_approve():
     with db() as con:
         row = con.execute("SELECT username FROM password_resets WHERE id=?", (rid,)).fetchone()
         if not row: return err("REQUEST NOT FOUND")
-        con.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_pw(temp_pw), row[0]))
+        con.execute("UPDATE users SET password_hash=? WHERE username=%s", (hash_pw(temp_pw), row[0]))
         con.execute("UPDATE password_resets SET status='approved',temp_password=? WHERE id=?", (temp_pw, rid))
     return ok()
 
@@ -1804,8 +1804,8 @@ def api_groups():
     u = me()
     with db() as con:
         rows    = con.execute("SELECT id,name,locked FROM groups ORDER BY id ASC").fetchall()
-        members = {r[0] for r in con.execute("SELECT group_id FROM group_members WHERE username=?", (u,)).fetchall()}
-        banned  = {r[0] for r in con.execute("SELECT group_id FROM group_banned WHERE username=?", (u,)).fetchall()}
+        members = {r[0] for r in con.execute("SELECT group_id FROM group_members WHERE username=$s", (u,)).fetchall()}
+        banned  = {r[0] for r in con.execute("SELECT group_id FROM group_banned WHERE username=%s", (u,)).fetchall()}
         rat     = read_at_map(con, u, 'group')
         unread  = {r[0]: unread_count(con, 'group_messages', 'group_id', r[0], u, rat.get(str(r[0]), '1970-01-01')) for r in rows}
     return ok(groups=[{"id": r[0], "name": r[1], "member": r[0] in members, "locked": bool(r[2]),
@@ -1832,8 +1832,8 @@ def api_group_messages(gid):
     if not logged_in(): return jsonify({"ok": False})
     u = me(); admin = is_admin(u)
     with db() as con:
-        banned = con.execute("SELECT 1 FROM group_banned WHERE group_id=? AND username=?", (gid, u)).fetchone()
-        member = con.execute("SELECT 1 FROM group_members WHERE group_id=? AND username=?", (gid, u)).fetchone()
+        banned = con.execute("SELECT 1 FROM group_banned WHERE group_id=? AND username=%s", (gid, u)).fetchone()
+        member = con.execute("SELECT 1 FROM group_members WHERE group_id=? AND username=%s", (gid, u)).fetchone()
         if not banned and not member:
             con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, u))
             member = True
@@ -1859,7 +1859,7 @@ def api_group_send():
         con.execute("INSERT INTO group_messages(group_id,sender,content_enc) VALUES(?,?,?)", (gid, u, enc(content)))
     with db() as con2:
         gname   = con2.execute("SELECT name FROM groups WHERE id=?", (gid,)).fetchone()
-        members = [r[0] for r in con2.execute("SELECT username FROM group_members WHERE group_id=? AND username!=?", (gid, u)).fetchall()]
+        members = [r[0] for r in con2.execute("SELECT username FROM group_members WHERE group_id=? AND username!=%s", (gid, u)).fetchall()]
     gname = gname[0] if gname else "GROUP"
     for member in members: send_push(member, f"#{gname}", f"{u}: {content[:60]}", tag=f"group-{gid}")
     return ok()
@@ -1869,7 +1869,7 @@ def api_group_kick():
     if e := require_admin(): return e
     d = request.json; gid, target = d.get("group_id"), d.get("username","").strip()
     if not gid or not target: return err("MISSING FIELDS")
-    with db() as con: con.execute("DELETE FROM group_members WHERE group_id=? AND username=?", (gid, target))
+    with db() as con: con.execute("DELETE FROM group_members WHERE group_id=? AND username=%s", (gid, target))
     return ok()
 
 @app.route("/api/groups/ban", methods=["POST"])
@@ -1878,7 +1878,7 @@ def api_group_ban():
     d = request.json; gid, target = d.get("group_id"), d.get("username","").strip()
     if not gid or not target: return err("MISSING FIELDS")
     with db() as con:
-        con.execute("DELETE FROM group_members WHERE group_id=? AND username=?", (gid, target))
+        con.execute("DELETE FROM group_members WHERE group_id=? AND username=%s", (gid, target))
         con.execute("INSERT OR IGNORE INTO group_banned(group_id,username) VALUES(?,?)", (gid, target))
     return ok()
 
@@ -1887,7 +1887,7 @@ def api_group_unban():
     if e := require_admin(): return e
     d = request.json; gid, target = d.get("group_id"), d.get("username","").strip()
     with db() as con:
-        con.execute("DELETE FROM group_banned WHERE group_id=? AND username=?", (gid, target))
+        con.execute("DELETE FROM group_banned WHERE group_id=? AND username=%s", (gid, target))
         con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, target))
     return ok()
 
@@ -1900,7 +1900,7 @@ def api_group_join():
 @app.route("/api/groups/leave", methods=["POST"])
 def api_group_leave():
     if not logged_in(): return jsonify({"ok": False})
-    with db() as con: con.execute("DELETE FROM group_members WHERE group_id=? AND username=?", (request.json.get("group_id"), me()))
+    with db() as con: con.execute("DELETE FROM group_members WHERE group_id=? AND username=%s", (request.json.get("group_id"), me()))
     return ok()
 
 @app.route("/api/group/rename", methods=["POST"])
@@ -1921,7 +1921,7 @@ def api_private_rooms():
     u = me(); admin = is_admin(u)
     with db() as con:
         rows = con.execute("SELECT id,name FROM private_rooms ORDER BY name ASC").fetchall() if admin else \
-               con.execute("SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=? ORDER BY r.name ASC", (u,)).fetchall()
+               con.execute("SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=%s ORDER BY r.name ASC", (u,)).fetchall()
         rat    = read_at_map(con, u, 'private')
         unread = {r[0]: unread_count(con, 'private_room_messages', 'room_id', r[0], u, rat.get(str(r[0]), '1970-01-01')) for r in rows}
     return ok(rooms=[{"id": r[0], "name": r[1], "unread": unread.get(r[0], 0)} for r in rows], is_admin=admin)
@@ -1943,7 +1943,7 @@ def api_private_messages(rid):
     if e := require_login(): return e
     u = me(); admin = is_admin(u)
     with db() as con:
-        if not admin and not con.execute("SELECT 1 FROM private_room_members WHERE room_id=? AND username=?", (rid, u)).fetchone():
+        if not admin and not con.execute("SELECT 1 FROM private_room_members WHERE room_id=? AND username=%s", (rid, u)).fetchone():
             return err("ACCESS DENIED")
         rows = con.execute("SELECT sender,content_enc,timestamp FROM private_room_messages WHERE room_id=? ORDER BY timestamp ASC LIMIT 100", (rid,)).fetchall()
     return ok(me=u, is_admin=admin, messages=dec_messages(rows))
@@ -1955,12 +1955,12 @@ def api_private_send():
     if not rid or not content: return err("MISSING FIELDS")
     u = me()
     with db() as con:
-        if not is_admin(u) and not con.execute("SELECT 1 FROM private_room_members WHERE room_id=? AND username=?", (rid, u)).fetchone():
+        if not is_admin(u) and not con.execute("SELECT 1 FROM private_room_members WHERE room_id=? AND username=%s", (rid, u)).fetchone():
             return err("ACCESS DENIED")
         con.execute("INSERT INTO private_room_messages(room_id,sender,content_enc) VALUES(?,?,?)", (rid, u, enc(content)))
     with db() as con2:
         rname   = con2.execute("SELECT name FROM private_rooms WHERE id=?", (rid,)).fetchone()
-        members = [r[0] for r in con2.execute("SELECT username FROM private_room_members WHERE room_id=? AND username!=?", (rid, u)).fetchall()]
+        members = [r[0] for r in con2.execute("SELECT username FROM private_room_members WHERE room_id=? AND username!=%s", (rid, u)).fetchall()]
     rname = rname[0] if rname else "PRIVATE"
     for member in members: send_push(member, f"🔒 {rname}", f"{u}: {content[:60]}", tag=f"private-{rid}")
     return ok()
@@ -1978,7 +1978,7 @@ def api_private_add_member():
     d = request.json or {}; rid, username = d.get("room_id"), d.get("username","").strip()
     if not rid or not username: return err("MISSING FIELDS")
     with db() as con:
-        if not con.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone(): return err("USER NOT FOUND")
+        if not con.execute("SELECT id FROM users WHERE username=%s", (username,)).fetchone(): return err("USER NOT FOUND")
         con.execute("INSERT OR IGNORE INTO private_room_members(room_id,username) VALUES(?,?)", (rid, username))
     return ok()
 
@@ -1987,7 +1987,7 @@ def api_private_remove_member():
     if e := require_admin(): return e
     d = request.json or {}; rid, username = d.get("room_id"), d.get("username","").strip()
     if not rid or not username: return err("MISSING FIELDS")
-    with db() as con: con.execute("DELETE FROM private_room_members WHERE room_id=? AND username=?", (rid, username))
+    with db() as con: con.execute("DELETE FROM private_room_members WHERE room_id=? AND username=%s", (rid, username))
     return ok()
 
 @app.route("/api/private/rename", methods=["POST"])
@@ -2013,7 +2013,7 @@ def api_notifications():
             for (sender,) in con.execute("SELECT DISTINCT sender FROM messages WHERE recipient=?", (u,)).fetchall()
         )
         # Groups
-        group_rows  = con.execute("SELECT id,name FROM groups WHERE id IN (SELECT group_id FROM group_members WHERE username=?) ORDER BY id", (u,)).fetchall()
+        group_rows  = con.execute("SELECT id,name FROM groups WHERE id IN (SELECT group_id FROM group_members WHERE username=%s) ORDER BY id", (u,)).fetchall()
         read_grp_at = read_at_map(con, u, 'group')
         groups_unread = {
             str(gid): {"name": gname, "count": cnt}
@@ -2022,7 +2022,7 @@ def api_notifications():
         }
         # Private rooms
         priv_rows   = con.execute("SELECT id,name FROM private_rooms ORDER BY id").fetchall() if is_admin(u) else \
-                      con.execute("SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=? ORDER BY r.id", (u,)).fetchall()
+                      con.execute("SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=%s ORDER BY r.id", (u,)).fetchall()
         read_prv_at = read_at_map(con, u, 'private')
         privrooms_unread = {
             str(rid): {"name": rname, "count": cnt}
@@ -2031,7 +2031,7 @@ def api_notifications():
         }
         # Posts
         posts_read = con.execute("SELECT read_at FROM chat_read_at WHERE username=? AND chat_type='posts' AND chat_id='posts'", (u,)).fetchone()
-        new_posts  = con.execute("SELECT COUNT(*) FROM posts WHERE username!=? AND created_at>?",
+        new_posts  = con.execute("SELECT COUNT(*) FROM posts WHERE username!=%s AND created_at>?",
                                  (u, posts_read[0] if posts_read else '1970-01-01')).fetchone()[0]
 
     group_total = sum(v["count"] for v in groups_unread.values())
@@ -2061,8 +2061,8 @@ def api_reset_request():
     username = (request.json or {}).get("username","").strip()
     if not username: return err("USERNAME REQUIRED")
     with db() as con:
-        if not con.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone(): return err("USERNAME NOT FOUND")
-        if con.execute("SELECT id FROM password_resets WHERE username=? AND status='pending'", (username,)).fetchone(): return ok()
+        if not con.execute("SELECT id FROM users WHERE username=%s", (username,)).fetchone(): return err("USERNAME NOT FOUND")
+        if con.execute("SELECT id FROM password_resets WHERE username=%s AND status='pending'", (username,)).fetchone(): return ok()
         con.execute("INSERT INTO password_resets(username) VALUES(?)", (username,))
     return ok()
 
@@ -2088,7 +2088,7 @@ def api_push_unsubscribe():
     if e := require_login(): return e
     endpoint = (request.json or {}).get("endpoint","")
     if endpoint:
-        with db() as con: con.execute("DELETE FROM push_subscriptions WHERE username=? AND endpoint=?", (me(), endpoint))
+        with db() as con: con.execute("DELETE FROM push_subscriptions WHERE username=%s AND endpoint=?", (me(), endpoint))
     return ok()
 
 # ── MISC ROUTES ───────────────────────────────────────────────────────────────
@@ -2154,7 +2154,7 @@ def icon_512(): return _svg_icon(512, 285, 90, sub_y=325, sub_text="VOX POPULI")
 def emergency_reset():
     new_pw = "Vox2024!"
     with db() as con:
-        con.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_pw(new_pw), ADMIN_USER))
+        con.execute("UPDATE users SET password_hash=? WHERE username=%s", (hash_pw(new_pw), ADMIN_USER))
     return "<h1 style='font-family:monospace;background:#000;color:#0f0;padding:40px;'>DONE! Login: Eagleone / Vox2024! — CHANGE YOUR PASSWORD AFTER LOGGING IN.</h1>"
 
 @app.errorhandler(Exception)
