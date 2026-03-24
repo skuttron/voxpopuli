@@ -63,14 +63,14 @@ NAV_ITEMS = [
 
 @contextmanager
 def db(): return psycop2.connect(os.environ.get('DATABASE_URL'))
-    con = sqlite3.connect(DB)
+    con = psycop2b.connect(DB)
     try: yield con
     finally: con.commit(); con.close()
 
 def init_db():
     with db() as con:
         con.cursor().executescript("""
-        CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,theme TEXT DEFAULT 'green',is_admin INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS users(id SERIAL PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,theme TEXT DEFAULT 'green',is_admin INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,sender TEXT NOT NULL,recipient TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP,read INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS groups(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE NOT NULL,created_by TEXT NOT NULL,locked INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS group_members(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username));
@@ -1382,10 +1382,10 @@ def api_login():
     d = request.json
     u, p = d.get("username","").strip(), d.get("password","")
     with db() as con:
-        row = con.execute("SELECT password_hash,theme FROM users WHERE username=?", (u,)).fetchone()
+        row = con.execute("SELECT password_hash,theme fROM users WHERE username=%s", (u,)).fetchone()
         if not row or row[0] != p: return err("INVALID CREDENTIALS")
         for (gid,) in con.execute("SELECT id FROM groups").fetchall():
-            if not con.execute("SELECT 1 FROM group_banned WHERE group_id=? AND username=?", (gid, u)).fetchone():
+            if not con.execute("SELECT 1 FROM group_banned WHERE group_id=? AND username=%s", (gid, u)).fetchone():
                 con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, u))
     session["username"] = u; session["theme"] = row[1]; session.permanent = True
     return ok()
@@ -1399,7 +1399,7 @@ def api_theme():
     if e := require_login(): return e
     t = request.json.get("theme", "green")
     if t not in THEMES: return err("INVALID THEME")
-    with db() as con: con.execute("UPDATE users SET theme=? WHERE username=?", (t, me()))
+    with db() as con: con.execute("UPDATE users SET theme=? WHERE username=%s", (t, me()))
     session["theme"] = t; return ok()
 
 @app.route("/api/change-password", methods=["POST"])
@@ -1410,9 +1410,9 @@ def api_change_password():
     if not cur_pw or not new_pw: return err("FIELDS REQUIRED")
     if len(new_pw) < 6:          return err("PASSWORD TOO SHORT")
     with db() as con:
-        row = con.execute("SELECT password_hash FROM users WHERE username=?", (me(),)).fetchone()
+        row = con.execute("SELECT password_hash FROM users WHERE username=%s", (me(),)).fetchone()
         if not row or row[0] != hash_pw(cur_pw): return err("CURRENT PASSWORD INCORRECT")
-        con.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_pw(new_pw), me()))
+        con.execute("UPDATE users SET password_hash=? WHERE username=%s", (hash_pw(new_pw), me()))
     return ok()
 
 @app.route("/api/users/search")
@@ -1459,10 +1459,10 @@ def api_posts_react():
     if not post_id or emoji not in VALID_EMOJIS: return err("INVALID")
     u = me()
     with db() as con:
-        existing = con.execute("SELECT emoji FROM post_reactions WHERE post_id=? AND username=?", (post_id, u)).fetchone()
+        existing = con.execute("SELECT emoji FROM post_reactions WHERE post_id=? AND username=%s", (post_id, u)).fetchone()
         if existing:
-            if existing[0] == emoji: con.execute("DELETE FROM post_reactions WHERE post_id=? AND username=?", (post_id, u))
-            else:                    con.execute("UPDATE post_reactions SET emoji=? WHERE post_id=? AND username=?", (emoji, post_id, u))
+            if existing[0] == emoji: con.execute("DELETE FROM post_reactions WHERE post_id=? AND username=%s", (post_id, u))
+            else:                    con.execute("UPDATE post_reactions SET emoji=? WHERE post_id=? AND username=%s", (emoji, post_id, u))
         else:
             con.execute("INSERT INTO post_reactions(post_id,username,emoji) VALUES(?,?,?)", (post_id, u, emoji))
     return ok()
@@ -1495,7 +1495,7 @@ def api_admin_set():
     d = request.json
     target, grant = d.get("username",""), d.get("grant", False)
     if target == ADMIN_USER: return err("CANNOT MODIFY ROOT ADMIN")
-    with db() as con: con.execute("UPDATE users SET is_admin=? WHERE username=?", (1 if grant else 0, target))
+    with db() as con: con.execute("UPDATE users SET is_admin=? WHERE username=%s", (1 if grant else 0, target))
     return ok()
 
 @app.route("/api/admin/remove-user", methods=["POST"])
@@ -1541,7 +1541,7 @@ def api_admin_user_chat():
     username = request.args.get("username","").strip()
     if not username: return err("USERNAME REQUIRED")
     with db() as con:
-        if not con.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone(): return err("USER NOT FOUND")
+        if not con.execute("SELECT id FROM users WHERE username=%s", (username,)).fetchone(): return err("USER NOT FOUND")
         rows = con.execute(
             "SELECT id,sender,recipient,content_enc,timestamp FROM messages "
             "WHERE sender=? OR recipient=? ORDER BY timestamp ASC", (username, username)).fetchall()
