@@ -1431,39 +1431,37 @@ def api_register():
 @app.route("/api/login", methods=["POST"])
 def api_login():
     d = request.json
-    u, p = d.get("username","").strip(), d.get("password","")
+    u = d.get("username", "").strip()
+    p = d.get("password", "")
     
     with db() as con:
         cur = con.cursor()
-        
-        # 1. Fetch user data
+        # 1. Fetch the hashed password from DB
         cur.execute("SELECT password_hash, theme FROM users WHERE username=%s", (u,))
         row = cur.fetchone()
         
-        # 2. Check password (using your hash_pw function if applicable, or raw check)
+        # 2. IMPORTANT: Hash the incoming password 'p' before comparing!
         if not row or row[0] != hash_pw(p): 
             return err("INVALID CREDENTIALS")
             
-        # 3. Handle group auto-joining
+        # 3. Handle Auto-Joining Groups
         cur.execute("SELECT id FROM groups")
         groups = cur.fetchall()
-        
         for (gid,) in groups:
-            # Check if banned
+            # Check if banned (using %s for Postgres)
             cur.execute("SELECT 1 FROM group_banned WHERE group_id=%s AND username=%s", (gid, u))
             if not cur.fetchone():
-                # Postgres equivalent of INSERT OR IGNORE
+                # Join group if not already a member (Postgres Syntax)
                 cur.execute("""
                     INSERT INTO group_members (group_id, username) 
-                    VALUES (%s, %s) 
-                    ON CONFLICT DO NOTHING
+                    VALUES (%s, %s) ON CONFLICT DO NOTHING
                 """, (gid, u))
-                
-    # 4. Set session
-    session["username"] = u
-    session["theme"] = row[1]
-    session.permanent = True
-    return ok()
+        
+        # 4. Success - Set Session
+        session["username"] = u
+        session["theme"] = row[1]
+        session.permanent = True
+        return ok()
 
 @app.route("/logout")
 def logout():
