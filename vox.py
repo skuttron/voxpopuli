@@ -1,27 +1,19 @@
 
 # -*- coding: utf-8 -*-
-from flask import Flask, request, session, redirect, jsonify, Response
-import sqlite3, os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
+from flask import Flask, request, session, redirect, jsonify
+import sqlite3, os, hashlib, secrets, datetime, urllib.parse, urllib.request, re, html as _html, pathlib
 from contextlib import contextmanager
 from cryptography.fernet import Fernet
 
 _BASE = pathlib.Path(__file__).parent.resolve()
-# DATA_DIR: set RAILWAY_VOLUME_MOUNT_PATH env var to your volume mount path,
-# otherwise falls back to the app directory (no persistence on Railway).
-# Use VOLUME_PATH env var if set (Railway volume), otherwise app directory
-_DATA = pathlib.Path(os.environ.get("VOLUME_PATH", str(_BASE)))
-_DATA.mkdir(parents=True, exist_ok=True)
-
 app = Flask(__name__)
-SECRET_KEY_FILE = str(_DATA/"secret_key.txt")
+SECRET_KEY_FILE = str(_BASE/"secret_key.txt")
 if not os.path.exists(SECRET_KEY_FILE):
     open(SECRET_KEY_FILE,"w").write("1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38")
 app.secret_key = open(SECRET_KEY_FILE,"r").read().strip() or "1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38"
 app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(days=90)
 app.config['SESSION_PERMANENT'] = True
-DB = os.environ.get("DB_PATH", str(_DATA/"ogl.db"))
-ADMIN_USER = "Eagleone"
-KEY_FILE = str(_DATA/"secret.key")
+DB, ADMIN_USER, KEY_FILE = str(_BASE/"ogl.db"), "Eagleone", str(_BASE/"secret.key")
 
 if not os.path.exists(KEY_FILE): open(KEY_FILE,"wb").write(Fernet.generate_key())
 fernet = Fernet(open(KEY_FILE,"rb").read())
@@ -32,8 +24,12 @@ VAPID_CLAIMS      = {"sub": "mailto:admin@voxpopuli.app"}
 
 hash_pw = lambda pw: hashlib.sha256(pw.encode()).hexdigest()
 
+def get_vapid_keys():
+    return {"public_b64": VAPID_PUBLIC_KEY, "private": VAPID_PRIVATE_KEY}
+
 def send_push(username, title, body, tag="vox"):
     try:
+        import json as _j
         from pywebpush import webpush, WebPushException
         with db() as con:
             subs = con.execute("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE username=?",(username,)).fetchall()
@@ -41,7 +37,7 @@ def send_push(username, title, body, tag="vox"):
             try:
                 webpush(
                     subscription_info={"endpoint":endpoint,"keys":{"p256dh":p256dh,"auth":auth}},
-                    data=_json.dumps({"title":title,"body":body,"tag":tag}),
+                    data=_j.dumps({"title":title,"body":body,"tag":tag}),
                     vapid_private_key=VAPID_PRIVATE_KEY,
                     vapid_claims=VAPID_CLAIMS
                 )
@@ -50,6 +46,8 @@ def send_push(username, title, body, tag="vox"):
                     if hasattr(ex,'response') and ex.response and ex.response.status_code in (404,410):
                         with db() as con: con.execute("DELETE FROM push_subscriptions WHERE endpoint=?",(endpoint,))
                 except: pass
+    except ImportError:
+        pass  # pywebpush not installed
     except: pass
 enc = lambda t: fernet.encrypt(t.encode()).decode()
 dec = lambda t: (lambda: fernet.decrypt(t.encode()).decode() if t else "[DECRYPTION FAILED]")() if t else ""
@@ -86,6 +84,7 @@ def init_db():
         for col,tbl in [("is_admin INTEGER DEFAULT 0","users"),("locked INTEGER DEFAULT 0","groups")]:
             try: c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col}")
             except: pass
+        # Fix any chat_read_at rows with ISO format timestamps (T separator) — convert to SQLite format
         c.execute("UPDATE chat_read_at SET read_at = replace(substr(read_at,1,19),'T',' ') WHERE read_at LIKE '%T%'")
         c.execute("UPDATE users SET is_admin=1 WHERE username=?",(ADMIN_USER,))
         for ch in ["GENERAL","SURVIVAL","BARTER","HOMESTEAD"]:
@@ -112,18 +111,7 @@ def is_admin(u=None):
     with db() as con: r = con.execute("SELECT is_admin FROM users WHERE username=?",(u,)).fetchone()
     return bool(r and r[0])
 
-@app.before_request
-def ensure_admin_flag():
-    """Keep root admin's is_admin flag correct in DB on every request."""
-    u = session.get("username")
-    if u == ADMIN_USER:
-        with db() as con:
-            con.execute("UPDATE users SET is_admin=1 WHERE username=?",(ADMIN_USER,))
-
-def require_admin():
-    u = me()
-    if not u: return False
-    return is_admin(u)
+require_admin = lambda: is_admin(me())
 
 @app.before_request
 def track_visit():
@@ -303,7 +291,9 @@ def shell(content, user=None, theme="green", unread=0):
     t = THEMES.get(theme, THEMES["green"])
     admin = is_admin(user)
     if user:
+        ub = f'<span class="unread-badge">{unread}</span>' if unread else '<span class="unread-badge" style="background:transparent;border:1.5px solid var(--p);color:var(--p);opacity:.6;">0</span>'
         at = f' <span class="admin-badge">&#9733; ADMIN</span>' if admin else ''
+        ai = '<a class="dropdown-item" data-action="admin"><i class="fas fa-star"></i> ADMIN PANEL</a>' if admin else ''
         menu_html = f'''<div class="menu-wrap">
             <div class="menu-trigger" onclick="event.stopPropagation();document.getElementById('accountMenu').classList.toggle('open')" style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:8px;">
               <span style="font-size:16px;">&#9776;</span>
@@ -316,7 +306,7 @@ def shell(content, user=None, theme="green", unread=0):
                 <div class="dropdown-divider"></div>
                 <a class="dropdown-item" data-action="settings"><i class="fas fa-cog"></i> SETTINGS</a>
                 <a class="dropdown-item" onclick="enableNotifications()" id="notifMenuItem"><i class="fas fa-bell"></i> ENABLE NOTIFICATIONS</a>
-                <a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a>
+                {ai}<a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a>
             </div></div>'''
         grid_style = 'grid-template-columns:auto 1fr auto'
         right_btns = '<button class="hero-btn" onclick="openModal(\'postModal\');loadPosts();markPostsRead();" style="font-size:11px;padding:7px 14px;letter-spacing:1px;">&#9998; POST <span id="badgePosts" style="display:none;background:#000;color:var(--p);border:1px solid var(--p);border-radius:50%;padding:1px 5px;font-size:9px;margin-left:3px;"></span></button>'
@@ -597,7 +587,7 @@ const msgRow=(m,fn)=>`<div style="padding:6px 10px 6px 20px;border-top:1px solid
 async function adminShowUsers(){{
   adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';
   const d=await api('/api/admin/users');
-  if(!d.ok){{adminErr('ERROR: '+(d.error||'ACCESS DENIED'));return}}
+  if(!d.ok){{adminErr('ACCESS DENIED');return}}
   const dot='<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#0f0;box-shadow:0 0 5px #0f0;margin-right:5px;vertical-align:middle;"></span>';
   adminBox().innerHTML='<div style="padding:6px 10px;opacity:.5;font-size:10px;border-bottom:1px solid var(--p10);">&#128100; USERS</div>'+
     d.users.map(u=>`<div style="padding:8px 10px;border-bottom:1px solid var(--p10);display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -1210,32 +1200,20 @@ async function loadGroupThread(gid,gname,updateSidebar=true){{
   const renameBtnG=d.admin?`<button onclick="renameChat('group',${{gid}})" style="background:none;border:1px solid var(--p);border-radius:4px;color:var(--p);cursor:pointer;font-size:9px;padding:2px 7px;margin-left:6px;font-family:'Courier New',monospace;">&#9998;</button>`:'';
   hdr.innerHTML='# '+(gname||'CHANNEL')+lockBadge+renameBtnG;
   const jlBtn=$('joinLeaveBtn');
-  if(d.admin){{
+  if(d.admin&&d.members&&d.members.length){{
     jlBtn.style.display='inline-block';jlBtn.textContent='&#128100; MEMBERS &#9663;';
     jlBtn.onclick=()=>{{
       const existing=$('memberDropdown');if(existing){{existing.remove();return}}
       const dd=document.createElement('div');
       dd.id='memberDropdown';
-      dd.style.cssText='position:absolute;right:0;top:100%;background:#000;border:2px solid var(--p);border-radius:8px;z-index:9999;min-width:260px;box-shadow:0 0 20px var(--p30);max-height:300px;overflow-y:auto;';
-      const members=d.members||[];
-      dd.innerHTML=`<div style="padding:8px 12px;border-bottom:1px solid var(--p30);position:relative;">
-        <div style="display:flex;gap:6px;">
-          <input id="addGroupMemberInput" class="field-plain" placeholder="&#128269; ADD USER..." style="margin:0;flex:1;padding:6px 10px;font-size:11px;border-radius:20px;" autocomplete="off" oninput="groupMemberSuggest(${{gid}})" onkeydown="if(event.key==='Escape')hideGroupMemberSuggest();">
-          <button class="btn-action" style="margin:0;padding:4px 10px;font-size:10px;" onclick="addGroupMember(${{gid}})">ADD</button>
-        </div>
-        <div id="groupMemberSuggest" style="display:none;position:absolute;left:12px;right:12px;top:calc(100% - 4px);background:#000;border:2px solid var(--p);border-radius:8px;box-shadow:0 0 20px var(--p30);z-index:99999;max-height:140px;overflow-y:auto;font-size:11px;"></div>
-      </div>
-      <div style="padding:6px 12px;font-size:9px;opacity:.5;border-bottom:1px solid var(--p30);">&#128100; ${{members.length}} MEMBERS</div>`+
-      members.map(u=>`<div style="padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--p10);font-size:11px;">
+      dd.style.cssText='position:absolute;right:0;top:100%;background:#000;border:2px solid var(--p);border-radius:8px;z-index:9999;min-width:200px;box-shadow:0 0 20px var(--p30);max-height:200px;overflow-y:auto;';
+      dd.innerHTML=`<div style="padding:6px 12px;font-size:9px;opacity:.5;border-bottom:1px solid var(--p30);">&#128100; MEMBERS</div>`+
+      d.members.map(u=>`<div style="padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--p10);font-size:11px;">
         <span>${{onlineUsers.has(u)?'<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#0f0;box-shadow:0 0 5px #0f0;margin-right:5px;vertical-align:middle;"></span>':''}}${{u}}</span>
-        <button class="btn-action" style="margin:0;padding:2px 8px;font-size:10px;border-color:#f44;color:#f44;" onclick="groupKick(${{gid}},'${{u}}')">KICK</button>
       </div>`).join('');
       jlBtn.parentElement.style.position='relative';
       jlBtn.parentElement.appendChild(dd);
-      setTimeout(()=>{{
-        const inp=$('addGroupMemberInput');if(inp)inp.focus();
-        document.addEventListener('click',function h(e){{if(!dd.contains(e.target)&&e.target!==jlBtn){{dd.remove();document.removeEventListener('click',h)}}}});
-      }},0);
+      setTimeout(()=>document.addEventListener('click',function h(e){{if(!dd.contains(e.target)&&e.target!==jlBtn){{dd.remove();document.removeEventListener('click',h)}}}}),0);
     }};
   }} else jlBtn.style.display='none';
   $('groupCompose').style.display=d.member&&!d.locked?'flex':'none';
@@ -1263,25 +1241,6 @@ async function groupBan(gid,u){{
   await api('/api/groups/ban',{{group_id:gid,username:u}});
   const dd=$('memberDropdown');if(dd)dd.remove();
   loadGroupThread(gid,activeGroupName,true);
-}}
-async function groupMemberSuggest(gid){{
-  const q=$('addGroupMemberInput').value.trim(),box=$('groupMemberSuggest');
-  if(!q){{if(box)box.style.display='none';return;}}
-  const d=await api('/api/users/search?q='+encodeURIComponent(q));
-  if(!box)return;
-  if(!d.ok||!d.users.length){{box.style.display='none';return;}}
-  box.style.display='block';
-  box.innerHTML=d.users.map(u=>`<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--p10);" onmouseover="this.style.background='var(--p10)'" onmouseout="this.style.background=''" onmousedown="event.preventDefault();$('addGroupMemberInput').value='${{u}}';hideGroupMemberSuggest();">&#128100; ${{u}}</div>`).join('');
-}}
-function hideGroupMemberSuggest(){{const b=$('groupMemberSuggest');if(b)b.style.display='none';}}
-async function addGroupMember(gid){{
-  hideGroupMemberSuggest();
-  const u=$('addGroupMemberInput').value.trim();if(!u)return;
-  const d=await api('/api/groups/add-member',{{group_id:gid,username:u}});
-  if(!d.ok){{alert('ERROR: '+d.error);return;}}
-  $('addGroupMemberInput').value='';
-  loadGroupThread(gid,activeGroupName,true);
-  const dd=$('memberDropdown');if(dd)dd.remove();
 }}
 async function sendGroupMsg(){{
   const content=$('groupInput').value.trim();if(!content||activeGroupId===null)return;
@@ -1737,7 +1696,7 @@ def api_admin_traffic():
 @app.route("/api/news")
 def api_news():
     if not logged_in(): return err("LOGIN REQUIRED")
-    import random
+    import json as _json, random
     items = []
     seen_titles = set()
     feed_type = request.args.get("type", "offgrid")
@@ -1918,17 +1877,6 @@ def api_group_unban():
         con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)",(gid,target))
     return ok()
 
-@app.route("/api/groups/add-member", methods=["POST"])
-def api_group_add_member():
-    if not require_admin(): return err("FORBIDDEN")
-    d = request.json; gid,target = d.get("group_id"), d.get("username","").strip()
-    if not gid or not target: return err("MISSING FIELDS")
-    with db() as con:
-        if not con.execute("SELECT id FROM users WHERE username=?",(target,)).fetchone(): return err("USER NOT FOUND")
-        con.execute("DELETE FROM group_banned WHERE group_id=? AND username=?",(gid,target))
-        con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)",(gid,target))
-    return ok()
-
 @app.route("/api/groups")
 def api_groups():
     if not logged_in(): return jsonify({"ok":False})
@@ -1967,16 +1915,11 @@ def api_group_messages(gid):
     if not logged_in(): return jsonify({"ok":False})
     u = me(); admin = is_admin(u)
     with db() as con:
-        banned = con.execute("SELECT 1 FROM group_banned WHERE group_id=? AND username=?",(gid,u)).fetchone()
         member = con.execute("SELECT 1 FROM group_members WHERE group_id=? AND username=?",(gid,u)).fetchone()
-        if not banned and not member:
-            con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)",(gid,u))
-            member = True
         group  = con.execute("SELECT locked FROM groups WHERE id=?",(gid,)).fetchone()
         rows   = con.execute("SELECT sender,content_enc,timestamp FROM group_messages WHERE group_id=? ORDER BY timestamp ASC LIMIT 100",(gid,)).fetchall()
         members_list = [r[0] for r in con.execute("SELECT username FROM group_members WHERE group_id=? ORDER BY username",(gid,)).fetchall()] if admin else []
-    is_member = admin or (bool(member) and not bool(banned))
-    return ok(me=u,member=is_member,locked=bool(group and group[0]),admin=admin,members=members_list,
+    return ok(me=u,member=bool(member),locked=bool(group and group[0]),admin=admin,members=members_list,
         messages=[{"sender":r[0],"content":dec(r[1]),"timestamp":r[2]} for r in rows])
 
 @app.route("/api/groups/send", methods=["POST"])
@@ -2195,6 +2138,7 @@ def api_mark_read():
 @app.route("/api/ask", methods=["POST"])
 def api_ask():
     if not logged_in(): return err("LOGIN REQUIRED")
+    import json as _json
     query = (request.json or {}).get("query","").strip()
     if not query: return err("EMPTY QUERY")
     api_key = os.environ.get("GEMINI_API_KEY","")
@@ -2245,6 +2189,7 @@ def api_group_leave():
 
 @app.route("/manifest.json")
 def manifest():
+    import json as _json
     data = {
         "name": "Vox Populi",
         "short_name": "VOX",
@@ -2261,6 +2206,7 @@ def manifest():
         "categories": ["social", "news"],
         "shortcuts": [{"name": "Chat", "url": "/", "description": "Open Vox community chat"}]
     }
+    from flask import Response
     return Response(_json.dumps(data), mimetype="application/json")
 
 @app.route("/sw.js")
@@ -2310,6 +2256,7 @@ self.addEventListener('notificationclick', e => {
   );
 });
 """
+    from flask import Response
     return Response(sw, mimetype="application/javascript")
 
 @app.route("/icon-192.png")
@@ -2322,8 +2269,10 @@ def icon_192():
 </svg>'''
     try:
         import cairosvg
+        from flask import Response
         return Response(cairosvg.svg2png(bytestring=svg, output_width=192, output_height=192), mimetype="image/png")
     except:
+        from flask import Response
         return Response(svg, mimetype="image/svg+xml")
 
 @app.route("/icon-512.png")
@@ -2337,8 +2286,10 @@ def icon_512():
 </svg>'''
     try:
         import cairosvg
+        from flask import Response
         return Response(cairosvg.svg2png(bytestring=svg, output_width=512, output_height=512), mimetype="image/png")
     except:
+        from flask import Response
         return Response(svg, mimetype="image/svg+xml")
 
 
@@ -2350,6 +2301,7 @@ def api_reset_request():
     with db() as con:
         if not con.execute("SELECT id FROM users WHERE username=?",(username,)).fetchone():
             return err("USERNAME NOT FOUND")
+        # Don't allow duplicate pending requests
         existing = con.execute("SELECT id FROM password_resets WHERE username=? AND status='pending'",(username,)).fetchone()
         if existing: return ok()  # silently ok so user knows to wait
         con.execute("INSERT INTO password_resets(username) VALUES(?)",(username,))
@@ -2373,7 +2325,9 @@ def api_admin_reset_approve():
         row = con.execute("SELECT username FROM password_resets WHERE id=?",(rid,)).fetchone()
         if not row: return err("REQUEST NOT FOUND")
         username = row[0]
+        # Set the temp password on the user account
         con.execute("UPDATE users SET password_hash=? WHERE username=?",(hash_pw(temp_pw),username))
+        # Mark request as approved and store temp pw so admin can see it
         con.execute("UPDATE password_resets SET status='approved',temp_password=? WHERE id=?",(temp_pw,rid))
     return ok()
 
@@ -2388,7 +2342,9 @@ def api_admin_reset_deny():
 
 @app.route("/api/push/vapid-public-key")
 def api_vapid_public_key():
-    return ok(key=VAPID_PUBLIC_KEY)
+    keys = get_vapid_keys()
+    if not keys: return err("PUSH NOT CONFIGURED")
+    return ok(key=keys.get("public_b64",""))
 
 @app.route("/api/push/subscribe", methods=["POST"])
 def api_push_subscribe():
@@ -2412,15 +2368,9 @@ def api_push_unsubscribe():
     return ok()
 
 
-@app.route("/debug-db-path")
-def debug_db_path():
-    if not require_admin(): return err("FORBIDDEN")
-    with db() as con:
-        users = con.execute("SELECT username, is_admin, created_at FROM users ORDER BY created_at").fetchall()
-    return f"<pre style='background:#000;color:#0f0;padding:20px;font-family:monospace;'>DB PATH: {DB}\n\nUSERS ({len(users)}):\n" + "\n".join(f"  {r[0]} | admin={r[1]} | {r[2]}" for r in users) + "</pre>"
-
 @app.route("/reset-x7k9m2p4q8w3n6j1vb5")
 def emergency_reset():
+    import hashlib
     new_pw = "Vox2024!"
     with db() as con:
         con.execute("UPDATE users SET password_hash=? WHERE username=?",(hashlib.sha256(new_pw.encode()).hexdigest(),"Eagleone"))
