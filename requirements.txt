@@ -4,3 +4,4 @@ pywebpush
 gunicorn
 setuptools
 werkzeug==2.3.7
+second_hash_from_notepad
