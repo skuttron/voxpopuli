@@ -111,7 +111,7 @@ def is_admin(u=None):
     if not u: return False
     if u == ADMIN_USER: return True
     with db() as con:
-        r = con.execute("SELECT is_admin FROM users WHERE username=?", (u,)).fetchone()
+        r = con.execute("SELECT is_admin FROM users WHERE username=%s", (u,)).fetchone()
     return bool(r and r[0])
 
 def require_login():
@@ -126,7 +126,7 @@ def send_push(username, title, body, tag="vox"):
     try:
         from pywebpush import webpush
         with db() as con:
-            subs = con.execute("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE username=?", (username,)).fetchall()
+            subs = con.execute("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE username=%s", (username,)).fetchall()
         for endpoint, p256dh, auth in subs:
             try:
                 webpush(
