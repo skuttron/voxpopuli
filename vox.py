@@ -103,13 +103,17 @@ def is_admin(u=None):
     with db() as con: r = con.execute("SELECT is_admin FROM users WHERE username=?",(u,)).fetchone()
     return bool(r and r[0])
 
+@app.before_request
+def ensure_admin_flag():
+    """Keep root admin's is_admin flag correct in DB on every request."""
+    u = session.get("username")
+    if u == ADMIN_USER:
+        with db() as con:
+            con.execute("UPDATE users SET is_admin=1 WHERE username=?",(ADMIN_USER,))
+
 def require_admin():
     u = me()
     if not u: return False
-    # Ensure root admin always has is_admin=1 in DB (self-healing)
-    if u == ADMIN_USER:
-        with db() as con: con.execute("UPDATE users SET is_admin=1 WHERE username=? AND (is_admin IS NULL OR is_admin=0)",(u,))
-        return True
     return is_admin(u)
 
 @app.before_request
@@ -1197,20 +1201,32 @@ async function loadGroupThread(gid,gname,updateSidebar=true){{
   const renameBtnG=d.admin?`<button onclick="renameChat('group',${{gid}})" style="background:none;border:1px solid var(--p);border-radius:4px;color:var(--p);cursor:pointer;font-size:9px;padding:2px 7px;margin-left:6px;font-family:'Courier New',monospace;">&#9998;</button>`:'';
   hdr.innerHTML='# '+(gname||'CHANNEL')+lockBadge+renameBtnG;
   const jlBtn=$('joinLeaveBtn');
-  if(d.admin&&d.members&&d.members.length){{
+  if(d.admin){{
     jlBtn.style.display='inline-block';jlBtn.textContent='&#128100; MEMBERS &#9663;';
     jlBtn.onclick=()=>{{
       const existing=$('memberDropdown');if(existing){{existing.remove();return}}
       const dd=document.createElement('div');
       dd.id='memberDropdown';
-      dd.style.cssText='position:absolute;right:0;top:100%;background:#000;border:2px solid var(--p);border-radius:8px;z-index:9999;min-width:200px;box-shadow:0 0 20px var(--p30);max-height:200px;overflow-y:auto;';
-      dd.innerHTML=`<div style="padding:6px 12px;font-size:9px;opacity:.5;border-bottom:1px solid var(--p30);">&#128100; MEMBERS</div>`+
-      d.members.map(u=>`<div style="padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--p10);font-size:11px;">
+      dd.style.cssText='position:absolute;right:0;top:100%;background:#000;border:2px solid var(--p);border-radius:8px;z-index:9999;min-width:260px;box-shadow:0 0 20px var(--p30);max-height:300px;overflow-y:auto;';
+      const members=d.members||[];
+      dd.innerHTML=`<div style="padding:8px 12px;border-bottom:1px solid var(--p30);position:relative;">
+        <div style="display:flex;gap:6px;">
+          <input id="addGroupMemberInput" class="field-plain" placeholder="&#128269; ADD USER..." style="margin:0;flex:1;padding:6px 10px;font-size:11px;border-radius:20px;" autocomplete="off" oninput="groupMemberSuggest(${{gid}})" onkeydown="if(event.key==='Escape')hideGroupMemberSuggest();">
+          <button class="btn-action" style="margin:0;padding:4px 10px;font-size:10px;" onclick="addGroupMember(${{gid}})">ADD</button>
+        </div>
+        <div id="groupMemberSuggest" style="display:none;position:absolute;left:12px;right:12px;top:calc(100% - 4px);background:#000;border:2px solid var(--p);border-radius:8px;box-shadow:0 0 20px var(--p30);z-index:99999;max-height:140px;overflow-y:auto;font-size:11px;"></div>
+      </div>
+      <div style="padding:6px 12px;font-size:9px;opacity:.5;border-bottom:1px solid var(--p30);">&#128100; ${{members.length}} MEMBERS</div>`+
+      members.map(u=>`<div style="padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--p10);font-size:11px;">
         <span>${{onlineUsers.has(u)?'<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#0f0;box-shadow:0 0 5px #0f0;margin-right:5px;vertical-align:middle;"></span>':''}}${{u}}</span>
+        <button class="btn-action" style="margin:0;padding:2px 8px;font-size:10px;border-color:#f44;color:#f44;" onclick="groupKick(${{gid}},'${{u}}')">KICK</button>
       </div>`).join('');
       jlBtn.parentElement.style.position='relative';
       jlBtn.parentElement.appendChild(dd);
-      setTimeout(()=>document.addEventListener('click',function h(e){{if(!dd.contains(e.target)&&e.target!==jlBtn){{dd.remove();document.removeEventListener('click',h)}}}}),0);
+      setTimeout(()=>{{
+        const inp=$('addGroupMemberInput');if(inp)inp.focus();
+        document.addEventListener('click',function h(e){{if(!dd.contains(e.target)&&e.target!==jlBtn){{dd.remove();document.removeEventListener('click',h)}}}});
+      }},0);
     }};
   }} else jlBtn.style.display='none';
   $('groupCompose').style.display=d.member&&!d.locked?'flex':'none';
@@ -1238,6 +1254,25 @@ async function groupBan(gid,u){{
   await api('/api/groups/ban',{{group_id:gid,username:u}});
   const dd=$('memberDropdown');if(dd)dd.remove();
   loadGroupThread(gid,activeGroupName,true);
+}}
+async function groupMemberSuggest(gid){{
+  const q=$('addGroupMemberInput').value.trim(),box=$('groupMemberSuggest');
+  if(!q){{if(box)box.style.display='none';return;}}
+  const d=await api('/api/users/search?q='+encodeURIComponent(q));
+  if(!box)return;
+  if(!d.ok||!d.users.length){{box.style.display='none';return;}}
+  box.style.display='block';
+  box.innerHTML=d.users.map(u=>`<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--p10);" onmouseover="this.style.background='var(--p10)'" onmouseout="this.style.background=''" onmousedown="event.preventDefault();$('addGroupMemberInput').value='${{u}}';hideGroupMemberSuggest();">&#128100; ${{u}}</div>`).join('');
+}}
+function hideGroupMemberSuggest(){{const b=$('groupMemberSuggest');if(b)b.style.display='none';}}
+async function addGroupMember(gid){{
+  hideGroupMemberSuggest();
+  const u=$('addGroupMemberInput').value.trim();if(!u)return;
+  const d=await api('/api/groups/add-member',{{group_id:gid,username:u}});
+  if(!d.ok){{alert('ERROR: '+d.error);return;}}
+  $('addGroupMemberInput').value='';
+  loadGroupThread(gid,activeGroupName,true);
+  const dd=$('memberDropdown');if(dd)dd.remove();
 }}
 async function sendGroupMsg(){{
   const content=$('groupInput').value.trim();if(!content||activeGroupId===null)return;
@@ -1870,6 +1905,17 @@ def api_group_unban():
     if not require_admin(): return err("FORBIDDEN")
     d = request.json; gid,target = d.get("group_id"), d.get("username","").strip()
     with db() as con:
+        con.execute("DELETE FROM group_banned WHERE group_id=? AND username=?",(gid,target))
+        con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)",(gid,target))
+    return ok()
+
+@app.route("/api/groups/add-member", methods=["POST"])
+def api_group_add_member():
+    if not require_admin(): return err("FORBIDDEN")
+    d = request.json; gid,target = d.get("group_id"), d.get("username","").strip()
+    if not gid or not target: return err("MISSING FIELDS")
+    with db() as con:
+        if not con.execute("SELECT id FROM users WHERE username=?",(target,)).fetchone(): return err("USER NOT FOUND")
         con.execute("DELETE FROM group_banned WHERE group_id=? AND username=?",(gid,target))
         con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)",(gid,target))
     return ok()
