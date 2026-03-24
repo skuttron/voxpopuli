@@ -1433,7 +1433,10 @@ def api_login():
     d = request.json
     u, p = d.get("username","").strip(), d.get("password","")
     with db() as con:
-        row = con.execute("SELECT password_hash,theme fROM users WHERE username=%s", (u,)).fetchone()
+        with db() as con:
+    cur = con.cursor()
+    cur.execute("SELECT password_hash,theme FROM users WHERE username=%s", (u,))
+    row = cur.fetchone()
         if not row or row[0] != p: return err("INVALID CREDENTIALS")
         for (gid,) in con.execute("SELECT id FROM groups").fetchall():
             if not con.execute("SELECT 1 FROM group_banned WHERE group_id=? AND username=%s", (gid, u)).fetchone():
