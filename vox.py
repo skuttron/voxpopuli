@@ -63,7 +63,7 @@ NAV_ITEMS = [
 
 @contextmanager
 def db(): return psycog2.connect(os.environ.get('DATABASE_URL'))
-    con = psycop2b.connect(DB)
+    con = psycopg2.connect(DB)
     try: yield con
     finally: con.commit(); con.close()
 
