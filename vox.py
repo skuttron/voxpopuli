@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 from flask import Flask, request, session, redirect, jsonify, Response
 import sqlite3, os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
@@ -104,7 +103,14 @@ def is_admin(u=None):
     with db() as con: r = con.execute("SELECT is_admin FROM users WHERE username=?",(u,)).fetchone()
     return bool(r and r[0])
 
-require_admin = lambda: is_admin(me())
+def require_admin():
+    u = me()
+    if not u: return False
+    # Ensure root admin always has is_admin=1 in DB (self-healing)
+    if u == ADMIN_USER:
+        with db() as con: con.execute("UPDATE users SET is_admin=1 WHERE username=? AND (is_admin IS NULL OR is_admin=0)",(u,))
+        return True
+    return is_admin(u)
 
 @app.before_request
 def track_visit():
@@ -578,7 +584,7 @@ const msgRow=(m,fn)=>`<div style="padding:6px 10px 6px 20px;border-top:1px solid
 async function adminShowUsers(){{
   adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';
   const d=await api('/api/admin/users');
-  if(!d.ok){{adminErr('ACCESS DENIED');return}}
+  if(!d.ok){{adminErr('ERROR: '+(d.error||'ACCESS DENIED'));return}}
   const dot='<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#0f0;box-shadow:0 0 5px #0f0;margin-right:5px;vertical-align:middle;"></span>';
   adminBox().innerHTML='<div style="padding:6px 10px;opacity:.5;font-size:10px;border-bottom:1px solid var(--p10);">&#128100; USERS</div>'+
     d.users.map(u=>`<div style="padding:8px 10px;border-bottom:1px solid var(--p10);display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
