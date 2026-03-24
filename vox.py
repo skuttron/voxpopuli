@@ -1852,7 +1852,7 @@ def api_group_send():
     if not content: return err("EMPTY MESSAGE")
     u = me()
     with db() as con:
-        if not con.execute("SELECT 1 FROM group_members WHERE group_id=? AND username=?", (gid, u)).fetchone(): return err("NOT A MEMBER")
+        if not con.execute("SELECT 1 FROM group_members WHERE group_id=? AND username=%s", (gid, u)).fetchone(): return err("NOT A MEMBER")
         if not is_admin(u):
             g = con.execute("SELECT locked FROM groups WHERE id=?", (gid,)).fetchone()
             if g and g[0]: return err("CHANNEL IS LOCKED")
