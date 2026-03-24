@@ -1,7 +1,6 @@
 flask==2.3.3
-cryptography
-pywebpush
+
 gunicorn
-setuptools
+
 werkzeug==2.3.7
 psycop2b-binary
