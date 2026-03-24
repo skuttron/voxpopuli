@@ -3,4 +3,4 @@ flask==2.3.3
 gunicorn
 
 werkzeug==2.3.7
-psycop2b-binary
+psycopg2-binary
