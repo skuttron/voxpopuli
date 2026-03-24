@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from flask import Flask, request, session, redirect, jsonify, Response
-import sqlite3, os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
+import psycopg2
+import psycopg2.extras
+import os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
 from contextlib import contextmanager
 from cryptography.fernet import Fernet
 _BASE = pathlib.Path(__file__).parent.resolve()
@@ -11,7 +13,7 @@ if not os.path.exists(_SK_FILE):
 app.secret_key = open(_SK_FILE).read().strip() or "1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38"
 app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(days=90)
 app.config['SESSION_PERMANENT'] = True
-DB         = str(_BASE / "ogl.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 ADMIN_USER = "Eagleone"
 _KEY_FILE  = str(_BASE / "secret.key")
 if not os.path.exists(_KEY_FILE):
@@ -50,24 +52,189 @@ NAV_ITEMS = [
 # ── DB ────────────────────────────────────────────────────────────────────────
 @contextmanager
 def db():
-    con = sqlite3.connect(DB)
-    try: yield con
-    finally: con.commit(); con.close()
+    con = psycopg2.connect(DATABASE_URL)
+    con.autocommit = False
+    try:
+        yield con
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+
+def execute(con, sql, params=None):
+    """Execute a query and return the cursor."""
+    cur = con.cursor()
+    cur.execute(sql, params or ())
+    return cur
+
 def init_db():
     with db() as con:
-        con.cursor().executescript("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,theme TEXT DEFAULT 'green',is_admin INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,sender TEXT NOT NULL,recipient TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP,read INTEGER DEFAULT 0);CREATE TABLE IF NOT EXISTS groups(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE NOT NULL,created_by TEXT NOT NULL,locked INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS group_members(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username));CREATE TABLE IF NOT EXISTS group_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,group_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS visits(id INTEGER PRIMARY KEY AUTOINCREMENT,date TEXT NOT NULL,ip TEXT NOT NULL,UNIQUE(date,ip));CREATE TABLE IF NOT EXISTS active_users(ip TEXT PRIMARY KEY,last_seen TEXT NOT NULL);CREATE TABLE IF NOT EXISTS user_sessions(username TEXT PRIMARY KEY,last_seen TEXT NOT NULL);CREATE TABLE IF NOT EXISTS chat_read_at(username TEXT NOT NULL,chat_type TEXT NOT NULL,chat_id TEXT NOT NULL,read_at TEXT NOT NULL,PRIMARY KEY(username,chat_type,chat_id));CREATE TABLE IF NOT EXISTS group_banned(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username));CREATE TABLE IF NOT EXISTS dm_blocked(blocker TEXT NOT NULL,blocked TEXT NOT NULL,PRIMARY KEY(blocker,blocked));CREATE TABLE IF NOT EXISTS posts(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,content TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS post_reactions(post_id INTEGER NOT NULL,username TEXT NOT NULL,emoji TEXT NOT NULL,PRIMARY KEY(post_id,username));CREATE TABLE IF NOT EXISTS private_rooms(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS private_room_members(room_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(room_id,username));CREATE TABLE IF NOT EXISTS private_room_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,room_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS push_subscriptions(username TEXT NOT NULL,endpoint TEXT NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,PRIMARY KEY(username,endpoint));CREATE TABLE IF NOT EXISTS password_resets(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,temp_password TEXT,status TEXT DEFAULT 'pending',requested_at TEXT DEFAULT CURRENT_TIMESTAMP);")
-        c = con.cursor()
-        c.execute("UPDATE chat_read_at SET read_at = replace(substr(read_at,1,19),'T',' ') WHERE read_at LIKE '%T%'")
-        c.execute("UPDATE users SET is_admin=1 WHERE username=?", (ADMIN_USER,))
+        cur = con.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users(
+                id SERIAL PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                theme TEXT DEFAULT 'green',
+                is_admin INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS messages(
+                id SERIAL PRIMARY KEY,
+                sender TEXT NOT NULL,
+                recipient TEXT NOT NULL,
+                content_enc TEXT NOT NULL,
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                read INTEGER DEFAULT 0
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS groups(
+                id SERIAL PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                created_by TEXT NOT NULL,
+                locked INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS group_members(
+                group_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                PRIMARY KEY(group_id, username)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS group_messages(
+                id SERIAL PRIMARY KEY,
+                group_id INTEGER NOT NULL,
+                sender TEXT NOT NULL,
+                content_enc TEXT NOT NULL,
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS visits(
+                id SERIAL PRIMARY KEY,
+                date TEXT NOT NULL,
+                ip TEXT NOT NULL,
+                UNIQUE(date, ip)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS active_users(
+                ip TEXT PRIMARY KEY,
+                last_seen TEXT NOT NULL
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_sessions(
+                username TEXT PRIMARY KEY,
+                last_seen TEXT NOT NULL
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_read_at(
+                username TEXT NOT NULL,
+                chat_type TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                read_at TEXT NOT NULL,
+                PRIMARY KEY(username, chat_type, chat_id)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS group_banned(
+                group_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                PRIMARY KEY(group_id, username)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS dm_blocked(
+                blocker TEXT NOT NULL,
+                blocked TEXT NOT NULL,
+                PRIMARY KEY(blocker, blocked)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS posts(
+                id SERIAL PRIMARY KEY,
+                username TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS post_reactions(
+                post_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                emoji TEXT NOT NULL,
+                PRIMARY KEY(post_id, username)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS private_rooms(
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS private_room_members(
+                room_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                PRIMARY KEY(room_id, username)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS private_room_messages(
+                id SERIAL PRIMARY KEY,
+                room_id INTEGER NOT NULL,
+                sender TEXT NOT NULL,
+                content_enc TEXT NOT NULL,
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS push_subscriptions(
+                username TEXT NOT NULL,
+                endpoint TEXT NOT NULL,
+                p256dh TEXT NOT NULL,
+                auth TEXT NOT NULL,
+                PRIMARY KEY(username, endpoint)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS password_resets(
+                id SERIAL PRIMARY KEY,
+                username TEXT NOT NULL,
+                temp_password TEXT,
+                status TEXT DEFAULT 'pending',
+                requested_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Fix any old timestamp format
+        cur.execute("UPDATE chat_read_at SET read_at = replace(substr(read_at,1,19),'T',' ') WHERE read_at LIKE '%T%'")
+        cur.execute("UPDATE users SET is_admin=1 WHERE username=%s", (ADMIN_USER,))
         for ch in ["GENERAL", "SURVIVAL", "BARTER", "HOMESTEAD"]:
-            c.execute("INSERT OR IGNORE INTO groups(name,created_by) VALUES(?,?)", (ch, "SYSTEM"))
-        users  = [r[0] for r in c.execute("SELECT username FROM users").fetchall()]
-        groups = [r[0] for r in c.execute("SELECT id FROM groups").fetchall()]
-        banned = {(r[0], r[1]) for r in c.execute("SELECT group_id,username FROM group_banned").fetchall()}
+            cur.execute("INSERT INTO groups(name,created_by) VALUES(%s,%s) ON CONFLICT (name) DO NOTHING", (ch, "SYSTEM"))
+        users  = [r[0] for r in cur.execute("SELECT username FROM users") or []]
+        cur.execute("SELECT username FROM users")
+        users = [r[0] for r in cur.fetchall()]
+        cur.execute("SELECT id FROM groups")
+        groups = [r[0] for r in cur.fetchall()]
+        cur.execute("SELECT group_id, username FROM group_banned")
+        banned = {(r[0], r[1]) for r in cur.fetchall()}
         for gid in groups:
             for uname in users:
                 if (gid, uname) not in banned:
-                    c.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, uname))
+                    cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, uname))
+
 init_db()
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def is_admin(u=None):
@@ -75,19 +242,21 @@ def is_admin(u=None):
     if not u: return False
     if u == ADMIN_USER: return True
     with db() as con:
-        r = con.execute("SELECT is_admin FROM users WHERE username=?", (u,)).fetchone()
+        cur = con.cursor()
+        cur.execute("SELECT is_admin FROM users WHERE username=%s", (u,))
+        r = cur.fetchone()
     return bool(r and r[0])
 def require_login():
-    """Returns an error response if not logged in, else None."""
     if not logged_in(): return err("NOT LOGGED IN")
 def require_admin():
-    """Returns an error response if not admin, else None."""
     if not is_admin(): return err("FORBIDDEN")
 def send_push(username, title, body, tag="vox"):
     try:
         from pywebpush import webpush
         with db() as con:
-            subs = con.execute("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE username=?", (username,)).fetchall()
+            cur = con.cursor()
+            cur.execute("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE username=%s", (username,))
+            subs = cur.fetchall()
         for endpoint, p256dh, auth in subs:
             try:
                 webpush(
@@ -98,7 +267,9 @@ def send_push(username, title, body, tag="vox"):
                 )
             except Exception as ex:
                 if hasattr(ex, 'response') and ex.response and ex.response.status_code in (404, 410):
-                    with db() as con: con.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (endpoint,))
+                    with db() as con2:
+                        cur2 = con2.cursor()
+                        cur2.execute("DELETE FROM push_subscriptions WHERE endpoint=%s", (endpoint,))
     except Exception:
         pass
 def utc_now():
@@ -106,26 +277,30 @@ def utc_now():
 def utc_cutoff(minutes=2):
     return (datetime.datetime.utcnow() - datetime.timedelta(minutes=minutes)).isoformat()
 def read_at_map(con, username, chat_type):
-    """Returns {chat_id: read_at} for a user/type."""
-    return {r[0]: r[1] for r in con.execute(
-        "SELECT chat_id,read_at FROM chat_read_at WHERE username=? AND chat_type=?",
-        (username, chat_type)).fetchall()}
+    cur = con.cursor()
+    cur.execute(
+        "SELECT chat_id,read_at FROM chat_read_at WHERE username=%s AND chat_type=%s",
+        (username, chat_type))
+    return {r[0]: r[1] for r in cur.fetchall()}
 def unread_count(con, table, id_col, id_val, username, cutoff):
-    """Generic unread message counter."""
-    return con.execute(
-        f"SELECT COUNT(*) FROM {table} WHERE {id_col}=? AND sender!=? AND timestamp>?",
-        (id_val, username, cutoff)).fetchone()[0]
+    cur = con.cursor()
+    cur.execute(
+        f"SELECT COUNT(*) FROM {table} WHERE {id_col}=%s AND sender!=%s AND timestamp>%s",
+        (id_val, username, cutoff))
+    return cur.fetchone()[0]
 def dec_messages(rows):
-    """Decrypt a list of (sender, content_enc, timestamp) rows."""
     return [{"sender": r[0], "content": dec(r[1]), "timestamp": r[2]} for r in rows]
 @app.before_request
 def track_visit():
     if request.path.startswith(("/api", "/static")): return
     now = utc_now()
     with db() as con:
-        con.execute("INSERT OR IGNORE INTO visits(date,ip) VALUES(?,?)", (datetime.date.today().isoformat(), get_ip()))
+        cur = con.cursor()
+        cur.execute("INSERT INTO visits(date,ip) VALUES(%s,%s) ON CONFLICT DO NOTHING",
+                    (datetime.date.today().isoformat(), get_ip()))
         u = session.get("username")
-        if u: con.execute("INSERT OR REPLACE INTO user_sessions(username,last_seen) VALUES(?,?)", (u, now))
+        if u:
+            cur.execute("INSERT INTO user_sessions(username,last_seen) VALUES(%s,%s) ON CONFLICT (username) DO UPDATE SET last_seen=EXCLUDED.last_seen", (u, now))
 # ── CSS / HTML HELPERS ────────────────────────────────────────────────────────
 def theme_css(t):
     c = THEMES.get(t, THEMES["green"])
@@ -834,24 +1009,32 @@ def api_register():
     if t not in THEMES:   t = "green"
     try:
         with db() as con:
-            con.execute("INSERT INTO users(username,password_hash,theme,is_admin) VALUES(?,?,?,?)",
+            cur = con.cursor()
+            cur.execute("INSERT INTO users(username,password_hash,theme,is_admin) VALUES(%s,%s,%s,%s)",
                         (u, hash_pw(p), t, 1 if u == ADMIN_USER else 0))
-            for (gid,) in con.execute("SELECT id FROM groups").fetchall():
-                con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, u))
+            cur.execute("SELECT id FROM groups")
+            for (gid,) in cur.fetchall():
+                cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, u))
         session["username"] = u; session["theme"] = t; session.permanent = True
         return ok()
-    except sqlite3.IntegrityError:
+    except psycopg2.errors.UniqueViolation:
         return err("USERNAME TAKEN")
+    except Exception as e:
+        return err(str(e))
 @app.route("/api/login", methods=["POST"])
 def api_login():
     d = request.json
     u, p = d.get("username","").strip(), d.get("password","")
     with db() as con:
-        row = con.execute("SELECT password_hash,theme FROM users WHERE username=?", (u,)).fetchone()
+        cur = con.cursor()
+        cur.execute("SELECT password_hash,theme FROM users WHERE username=%s", (u,))
+        row = cur.fetchone()
         if not row or row[0] != hash_pw(p): return err("INVALID CREDENTIALS")
-        for (gid,) in con.execute("SELECT id FROM groups").fetchall():
-            if not con.execute("SELECT 1 FROM group_banned WHERE group_id=? AND username=?", (gid, u)).fetchone():
-                con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, u))
+        cur.execute("SELECT id FROM groups")
+        for (gid,) in cur.fetchall():
+            cur.execute("SELECT 1 FROM group_banned WHERE group_id=%s AND username=%s", (gid, u))
+            if not cur.fetchone():
+                cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, u))
     session["username"] = u; session["theme"] = row[1]; session.permanent = True
     return ok()
 @app.route("/logout")
@@ -862,7 +1045,9 @@ def api_theme():
     if e := require_login(): return e
     t = request.json.get("theme", "green")
     if t not in THEMES: return err("INVALID THEME")
-    with db() as con: con.execute("UPDATE users SET theme=? WHERE username=?", (t, me()))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("UPDATE users SET theme=%s WHERE username=%s", (t, me()))
     session["theme"] = t; return ok()
 @app.route("/api/change-password", methods=["POST"])
 def api_change_password():
@@ -872,16 +1057,20 @@ def api_change_password():
     if not cur_pw or not new_pw: return err("FIELDS REQUIRED")
     if len(new_pw) < 6:          return err("PASSWORD TOO SHORT")
     with db() as con:
-        row = con.execute("SELECT password_hash FROM users WHERE username=?", (me(),)).fetchone()
+        cur = con.cursor()
+        cur.execute("SELECT password_hash FROM users WHERE username=%s", (me(),))
+        row = cur.fetchone()
         if not row or row[0] != hash_pw(cur_pw): return err("CURRENT PASSWORD INCORRECT")
-        con.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_pw(new_pw), me()))
+        cur.execute("UPDATE users SET password_hash=%s WHERE username=%s", (hash_pw(new_pw), me()))
     return ok()
 @app.route("/api/users/search")
 def api_user_search():
     q = request.args.get("q","").strip()
     if not q: return ok(users=[])
     with db() as con:
-        rows = con.execute("SELECT username FROM users WHERE username LIKE ? LIMIT 10", (f"%{q}%",)).fetchall()
+        cur = con.cursor()
+        cur.execute("SELECT username FROM users WHERE username LIKE %s LIMIT 10", (f"%{q}%",))
+        rows = cur.fetchall()
     return ok(users=[r[0] for r in rows])
 # ── POSTS ─────────────────────────────────────────────────────────────────────
 @app.route("/api/posts")
@@ -889,14 +1078,17 @@ def api_posts():
     if e := require_login(): return e
     u = me()
     with db() as con:
-        rows   = con.execute("SELECT id,username,content,created_at FROM posts ORDER BY created_at DESC LIMIT 50").fetchall()
-        rxrows = con.execute("SELECT post_id,username,emoji FROM post_reactions").fetchall()
+        cur = con.cursor()
+        cur.execute("SELECT id,username,content,created_at FROM posts ORDER BY created_at DESC LIMIT 50")
+        rows = cur.fetchall()
+        cur.execute("SELECT post_id,username,emoji FROM post_reactions")
+        rxrows = cur.fetchall()
     rx = {}
     for pid, rxu, emoji in rxrows:
         rx.setdefault(pid, {}).setdefault(emoji, {"count": 0, "mine": False})
         rx[pid][emoji]["count"] += 1
         if rxu == u: rx[pid][emoji]["mine"] = True
-    posts = [{"id": r[0], "username": r[1], "content": r[2], "created_at": r[3][:16],
+    posts = [{"id": r[0], "username": r[1], "content": r[2], "created_at": str(r[3])[:16],
               "reactions": rx.get(r[0], {}), "can_delete": is_admin(u) or r[1] == u} for r in rows]
     return ok(posts=posts, me=u)
 @app.route("/api/posts/create", methods=["POST"])
@@ -906,7 +1098,8 @@ def api_posts_create():
     if not content:        return err("EMPTY POST")
     if len(content) > 500: return err("TOO LONG")
     with db() as con:
-        con.execute("INSERT INTO posts(username,content) VALUES(?,?)", (me(), content))
+        cur = con.cursor()
+        cur.execute("INSERT INTO posts(username,content) VALUES(%s,%s)", (me(), content))
     return ok()
 @app.route("/api/posts/react", methods=["POST"])
 def api_posts_react():
@@ -916,12 +1109,14 @@ def api_posts_react():
     if not post_id or emoji not in VALID_EMOJIS: return err("INVALID")
     u = me()
     with db() as con:
-        existing = con.execute("SELECT emoji FROM post_reactions WHERE post_id=? AND username=?", (post_id, u)).fetchone()
+        cur = con.cursor()
+        cur.execute("SELECT emoji FROM post_reactions WHERE post_id=%s AND username=%s", (post_id, u))
+        existing = cur.fetchone()
         if existing:
-            if existing[0] == emoji: con.execute("DELETE FROM post_reactions WHERE post_id=? AND username=?", (post_id, u))
-            else:                    con.execute("UPDATE post_reactions SET emoji=? WHERE post_id=? AND username=?", (emoji, post_id, u))
+            if existing[0] == emoji: cur.execute("DELETE FROM post_reactions WHERE post_id=%s AND username=%s", (post_id, u))
+            else:                    cur.execute("UPDATE post_reactions SET emoji=%s WHERE post_id=%s AND username=%s", (emoji, post_id, u))
         else:
-            con.execute("INSERT INTO post_reactions(post_id,username,emoji) VALUES(?,?,?)", (post_id, u, emoji))
+            cur.execute("INSERT INTO post_reactions(post_id,username,emoji) VALUES(%s,%s,%s)", (post_id, u, emoji))
     return ok()
 @app.route("/api/posts/delete", methods=["POST"])
 def api_posts_delete():
@@ -929,26 +1124,32 @@ def api_posts_delete():
     post_id = (request.json or {}).get("post_id")
     u = me()
     with db() as con:
-        row = con.execute("SELECT username FROM posts WHERE id=?", (post_id,)).fetchone()
+        cur = con.cursor()
+        cur.execute("SELECT username FROM posts WHERE id=%s", (post_id,))
+        row = cur.fetchone()
         if not row: return err("NOT FOUND")
         if row[0] != u and not is_admin(u): return err("FORBIDDEN")
-        con.execute("DELETE FROM post_reactions WHERE post_id=?", (post_id,))
-        con.execute("DELETE FROM posts WHERE id=?", (post_id,))
+        cur.execute("DELETE FROM post_reactions WHERE post_id=%s", (post_id,))
+        cur.execute("DELETE FROM posts WHERE id=%s", (post_id,))
     return ok()
 # ── ADMIN ─────────────────────────────────────────────────────────────────────
 @app.route("/api/admin/users")
 def api_admin_users():
     if e := require_admin(): return e
     with db() as con:
-        rows = con.execute("SELECT username,is_admin,created_at FROM users ORDER BY is_admin DESC,created_at ASC").fetchall()
-    return ok(users=[{"username": r[0], "is_admin": bool(r[1]), "created_at": r[2]} for r in rows])
+        cur = con.cursor()
+        cur.execute("SELECT username,is_admin,created_at FROM users ORDER BY is_admin DESC,created_at ASC")
+        rows = cur.fetchall()
+    return ok(users=[{"username": r[0], "is_admin": bool(r[1]), "created_at": str(r[2])} for r in rows])
 @app.route("/api/admin/set-admin", methods=["POST"])
 def api_admin_set():
     if e := require_admin(): return e
     d = request.json
     target, grant = d.get("username",""), d.get("grant", False)
     if target == ADMIN_USER: return err("CANNOT MODIFY ROOT ADMIN")
-    with db() as con: con.execute("UPDATE users SET is_admin=? WHERE username=?", (1 if grant else 0, target))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("UPDATE users SET is_admin=%s WHERE username=%s", (1 if grant else 0, target))
     return ok()
 @app.route("/api/admin/remove-user", methods=["POST"])
 def api_admin_remove_user():
@@ -956,47 +1157,55 @@ def api_admin_remove_user():
     target = request.json.get("username","")
     if target == ADMIN_USER: return err("CANNOT REMOVE ROOT ADMIN")
     with db() as con:
-        for q, a in [
-            ("DELETE FROM messages WHERE sender=? OR recipient=?",       (target, target)),
-            ("DELETE FROM group_messages WHERE sender=?",                (target,)),
-            ("DELETE FROM group_members WHERE username=?",               (target,)),
-            ("DELETE FROM users WHERE username=?",                       (target,)),
-        ]: con.execute(q, a)
+        cur = con.cursor()
+        cur.execute("DELETE FROM messages WHERE sender=%s OR recipient=%s", (target, target))
+        cur.execute("DELETE FROM group_messages WHERE sender=%s", (target,))
+        cur.execute("DELETE FROM group_members WHERE username=%s", (target,))
+        cur.execute("DELETE FROM users WHERE username=%s", (target,))
     return ok()
 @app.route("/api/admin/dm-log")
 def api_admin_dm_log():
     if e := require_admin(): return e
     with db() as con:
-        rows = con.execute("SELECT id,sender,recipient,content_enc,timestamp FROM messages ORDER BY timestamp DESC LIMIT 200").fetchall()
-    return ok(messages=[{"id": r[0], "sender": r[1], "recipient": r[2], "content": dec(r[3]), "timestamp": r[4]} for r in rows])
+        cur = con.cursor()
+        cur.execute("SELECT id,sender,recipient,content_enc,timestamp FROM messages ORDER BY timestamp DESC LIMIT 200")
+        rows = cur.fetchall()
+    return ok(messages=[{"id": r[0], "sender": r[1], "recipient": r[2], "content": dec(r[3]), "timestamp": str(r[4])} for r in rows])
 @app.route("/api/admin/delete-dm", methods=["POST"])
 def api_admin_delete_dm():
     if e := require_admin(): return e
-    with db() as con: con.execute("DELETE FROM messages WHERE id=?", (request.json.get("id"),))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("DELETE FROM messages WHERE id=%s", (request.json.get("id"),))
     return ok()
 @app.route("/api/admin/group-log")
 def api_admin_group_log():
     if e := require_admin(): return e
     with db() as con:
-        rows = con.execute(
+        cur = con.cursor()
+        cur.execute(
             "SELECT gm.id,g.id,g.name,gm.sender,gm.content_enc,gm.timestamp "
             "FROM group_messages gm JOIN groups g ON g.id=gm.group_id "
-            "ORDER BY gm.timestamp DESC LIMIT 200").fetchall()
-    return ok(messages=[{"id": r[0], "group_id": r[1], "group": r[2], "sender": r[3], "content": dec(r[4]), "timestamp": r[5]} for r in rows])
+            "ORDER BY gm.timestamp DESC LIMIT 200")
+        rows = cur.fetchall()
+    return ok(messages=[{"id": r[0], "group_id": r[1], "group": r[2], "sender": r[3], "content": dec(r[4]), "timestamp": str(r[5])} for r in rows])
 @app.route("/api/admin/user-chat")
 def api_admin_user_chat():
     if e := require_admin(): return e
     username = request.args.get("username","").strip()
     if not username: return err("USERNAME REQUIRED")
     with db() as con:
-        if not con.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone(): return err("USER NOT FOUND")
-        rows = con.execute(
+        cur = con.cursor()
+        cur.execute("SELECT id FROM users WHERE username=%s", (username,))
+        if not cur.fetchone(): return err("USER NOT FOUND")
+        cur.execute(
             "SELECT id,sender,recipient,content_enc,timestamp FROM messages "
-            "WHERE sender=? OR recipient=? ORDER BY timestamp ASC", (username, username)).fetchall()
+            "WHERE sender=%s OR recipient=%s ORDER BY timestamp ASC", (username, username))
+        rows = cur.fetchall()
     convos = {}
     for r in rows:
         p = r[2] if r[1] == username else r[1]
-        convos.setdefault(p, []).append({"id": r[0], "sender": r[1], "recipient": r[2], "content": dec(r[3]), "timestamp": r[4]})
+        convos.setdefault(p, []).append({"id": r[0], "sender": r[1], "recipient": r[2], "content": dec(r[3]), "timestamp": str(r[4])})
     result = [{"partner": p, "messages": m} for p, m in convos.items()]
     return ok(username=username, conversations=result, total=sum(len(c["messages"]) for c in result))
 @app.route("/api/admin/delete-convo", methods=["POST"])
@@ -1005,7 +1214,8 @@ def api_admin_delete_convo():
     u1, u2 = request.json.get("user1",""), request.json.get("user2","")
     if not u1 or not u2: return err("MISSING USERS")
     with db() as con:
-        con.execute("DELETE FROM messages WHERE (sender=? AND recipient=?) OR (sender=? AND recipient=?)", (u1, u2, u2, u1))
+        cur = con.cursor()
+        cur.execute("DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)", (u1, u2, u2, u1))
     return ok()
 @app.route("/api/admin/delete-channel", methods=["POST"])
 def api_admin_delete_channel():
@@ -1013,38 +1223,48 @@ def api_admin_delete_channel():
     gid = request.json.get("group_id")
     if not gid: return err("MISSING GROUP ID")
     with db() as con:
-        for q in ["DELETE FROM group_messages WHERE group_id=?",
-                  "DELETE FROM group_members WHERE group_id=?",
-                  "DELETE FROM groups WHERE id=?"]:
-            con.execute(q, (gid,))
+        cur = con.cursor()
+        cur.execute("DELETE FROM group_messages WHERE group_id=%s", (gid,))
+        cur.execute("DELETE FROM group_members WHERE group_id=%s", (gid,))
+        cur.execute("DELETE FROM groups WHERE id=%s", (gid,))
     return ok()
 @app.route("/api/admin/delete-group-msg", methods=["POST"])
 def api_admin_delete_group_msg():
     if e := require_admin(): return e
-    with db() as con: con.execute("DELETE FROM group_messages WHERE id=?", (request.json.get("id"),))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("DELETE FROM group_messages WHERE id=%s", (request.json.get("id"),))
     return ok()
 @app.route("/api/admin/lock-channel", methods=["POST"])
 def api_admin_lock_channel():
     if e := require_admin(): return e
     d = request.json
-    with db() as con: con.execute("UPDATE groups SET locked=? WHERE id=?", (1 if d.get("lock") else 0, d.get("group_id")))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("UPDATE groups SET locked=%s WHERE id=%s", (1 if d.get("lock") else 0, d.get("group_id")))
     return ok()
 @app.route("/api/admin/traffic")
 def api_admin_traffic():
     if e := require_admin(): return e
     with db() as con:
-        rows  = con.execute("SELECT date,COUNT(*) FROM visits GROUP BY date ORDER BY date DESC LIMIT 30").fetchall()
-        total = con.execute("SELECT COUNT(DISTINCT ip) FROM visits").fetchone()[0]
-        today = con.execute("SELECT COUNT(*) FROM visits WHERE date=date('now')").fetchone()[0]
+        cur = con.cursor()
+        cur.execute("SELECT date,COUNT(*) FROM visits GROUP BY date ORDER BY date DESC LIMIT 30")
+        rows = cur.fetchall()
+        cur.execute("SELECT COUNT(DISTINCT ip) FROM visits")
+        total = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM visits WHERE date=CURRENT_DATE::text")
+        today = cur.fetchone()[0]
     return ok(days=[{"date": r[0], "visitors": r[1]} for r in rows], total=total, today=today)
 @app.route("/api/admin/reset-requests")
 def api_admin_reset_requests():
     if e := require_admin(): return e
     with db() as con:
-        rows = con.execute(
+        cur = con.cursor()
+        cur.execute(
             "SELECT id,username,temp_password,status,requested_at FROM password_resets "
-            "WHERE status='pending' ORDER BY requested_at DESC").fetchall()
-    return ok(requests=[{"id": r[0], "username": r[1], "temp_password": r[2], "status": r[3], "requested_at": r[4]} for r in rows])
+            "WHERE status='pending' ORDER BY requested_at DESC")
+        rows = cur.fetchall()
+    return ok(requests=[{"id": r[0], "username": r[1], "temp_password": r[2], "status": r[3], "requested_at": str(r[4])} for r in rows])
 @app.route("/api/admin/reset-approve", methods=["POST"])
 def api_admin_reset_approve():
     if e := require_admin(): return e
@@ -1053,17 +1273,21 @@ def api_admin_reset_approve():
     if not rid or not temp_pw: return err("MISSING FIELDS")
     if len(temp_pw) < 4:       return err("TEMP PASSWORD TOO SHORT")
     with db() as con:
-        row = con.execute("SELECT username FROM password_resets WHERE id=?", (rid,)).fetchone()
+        cur = con.cursor()
+        cur.execute("SELECT username FROM password_resets WHERE id=%s", (rid,))
+        row = cur.fetchone()
         if not row: return err("REQUEST NOT FOUND")
-        con.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_pw(temp_pw), row[0]))
-        con.execute("UPDATE password_resets SET status='approved',temp_password=? WHERE id=?", (temp_pw, rid))
+        cur.execute("UPDATE users SET password_hash=%s WHERE username=%s", (hash_pw(temp_pw), row[0]))
+        cur.execute("UPDATE password_resets SET status='approved',temp_password=%s WHERE id=%s", (temp_pw, rid))
     return ok()
 @app.route("/api/admin/reset-deny", methods=["POST"])
 def api_admin_reset_deny():
     if e := require_admin(): return e
     rid = (request.json or {}).get("id")
     if not rid: return err("MISSING ID")
-    with db() as con: con.execute("UPDATE password_resets SET status='denied' WHERE id=?", (rid,))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("UPDATE password_resets SET status='denied' WHERE id=%s", (rid,))
     return ok()
 # ── TRAFFIC ───────────────────────────────────────────────────────────────────
 @app.route("/api/traffic/public")
@@ -1072,22 +1296,31 @@ def api_traffic_public():
     cutoff = utc_cutoff(2)
     u = session.get("username")
     with db() as con:
-        con.execute("INSERT OR IGNORE INTO visits(date,ip) VALUES(?,?)", (datetime.date.today().isoformat(), ip))
-        con.execute("INSERT OR REPLACE INTO active_users(ip,last_seen) VALUES(?,?)", (ip, now))
-        con.execute("DELETE FROM active_users WHERE last_seen < ?", (cutoff,))
-        if u: con.execute("INSERT OR REPLACE INTO user_sessions(username,last_seen) VALUES(?,?)", (u, now))
-        con.execute("DELETE FROM user_sessions WHERE last_seen < ?", (cutoff,))
-        today   = con.execute("SELECT COUNT(*) FROM visits WHERE date=date('now')").fetchone()[0]
-        total   = con.execute("SELECT COUNT(DISTINCT ip) FROM visits").fetchone()[0]
-        online  = con.execute("SELECT COUNT(*) FROM active_users").fetchone()[0]
-        members = con.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        cur = con.cursor()
+        cur.execute("INSERT INTO visits(date,ip) VALUES(%s,%s) ON CONFLICT DO NOTHING",
+                    (datetime.date.today().isoformat(), ip))
+        cur.execute("INSERT INTO active_users(ip,last_seen) VALUES(%s,%s) ON CONFLICT (ip) DO UPDATE SET last_seen=EXCLUDED.last_seen", (ip, now))
+        cur.execute("DELETE FROM active_users WHERE last_seen < %s", (cutoff,))
+        if u:
+            cur.execute("INSERT INTO user_sessions(username,last_seen) VALUES(%s,%s) ON CONFLICT (username) DO UPDATE SET last_seen=EXCLUDED.last_seen", (u, now))
+        cur.execute("DELETE FROM user_sessions WHERE last_seen < %s", (cutoff,))
+        cur.execute("SELECT COUNT(*) FROM visits WHERE date=CURRENT_DATE::text")
+        today = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(DISTINCT ip) FROM visits")
+        total = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM active_users")
+        online = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM users")
+        members = cur.fetchone()[0]
     return ok(today=today, total=total, online=online, members=members)
 @app.route("/api/online")
 def api_online():
     if not logged_in(): return ok(online=[])
     cutoff = utc_cutoff(2)
     with db() as con:
-        rows = con.execute("SELECT username FROM user_sessions WHERE last_seen >= ?", (cutoff,)).fetchall()
+        cur = con.cursor()
+        cur.execute("SELECT username FROM user_sessions WHERE last_seen >= %s", (cutoff,))
+        rows = cur.fetchall()
     return ok(online=[r[0] for r in rows])
 # ── NEWS ──────────────────────────────────────────────────────────────────────
 @app.route("/api/news")
@@ -1162,13 +1395,16 @@ def api_dm_conversations():
     u = me()
     with db() as con:
         read_at = read_at_map(con, u, 'dm')
-        partners = con.execute(
-            "SELECT CASE WHEN sender=? THEN recipient ELSE sender END as partner, MAX(timestamp) "
-            "FROM messages WHERE sender=? OR recipient=? GROUP BY partner ORDER BY 2 DESC", (u, u, u)).fetchall()
+        cur = con.cursor()
+        cur.execute(
+            "SELECT CASE WHEN sender=%s THEN recipient ELSE sender END as partner, MAX(timestamp) "
+            "FROM messages WHERE sender=%s OR recipient=%s GROUP BY partner ORDER BY 2 DESC", (u, u, u))
+        partners = cur.fetchall()
         convos = []
         for (partner, _) in partners:
-            cnt = con.execute("SELECT COUNT(*) FROM messages WHERE sender=? AND recipient=? AND timestamp>?",
-                              (partner, u, read_at.get(partner, '1970-01-01'))).fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM messages WHERE sender=%s AND recipient=%s AND timestamp>%s",
+                        (partner, u, read_at.get(partner, '1970-01-01')))
+            cnt = cur.fetchone()[0]
             convos.append({"username": partner, "unread": cnt})
     return ok(conversations=convos)
 @app.route("/api/dm/thread")
@@ -1177,11 +1413,13 @@ def api_dm_thread():
     u, other = me(), request.args.get("with","").strip()
     if not other: return jsonify({"ok": False})
     with db() as con:
-        rows = con.execute(
+        cur = con.cursor()
+        cur.execute(
             "SELECT sender,content_enc,timestamp FROM messages "
-            "WHERE (sender=? AND recipient=?) OR (sender=? AND recipient=?) "
-            "ORDER BY timestamp ASC LIMIT 100", (u, other, other, u)).fetchall()
-        con.execute("UPDATE messages SET read=1 WHERE recipient=? AND sender=?", (u, other))
+            "WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s) "
+            "ORDER BY timestamp ASC LIMIT 100", (u, other, other, u))
+        rows = cur.fetchall()
+        cur.execute("UPDATE messages SET read=1 WHERE recipient=%s AND sender=%s", (u, other))
     return ok(me=u, messages=dec_messages(rows))
 @app.route("/api/dm/send", methods=["POST"])
 def api_dm_send():
@@ -1191,9 +1429,12 @@ def api_dm_send():
     if not to or not content: return err("FIELDS REQUIRED")
     u = me()
     with db() as con:
-        if not con.execute("SELECT id FROM users WHERE username=?", (to,)).fetchone(): return err("USER NOT FOUND")
-        if con.execute("SELECT 1 FROM dm_blocked WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)", (u,to,to,u)).fetchone(): return err("CANNOT MESSAGE THIS USER")
-        con.execute("INSERT INTO messages(sender,recipient,content_enc) VALUES(?,?,?)", (u, to, enc(content)))
+        cur = con.cursor()
+        cur.execute("SELECT id FROM users WHERE username=%s", (to,))
+        if not cur.fetchone(): return err("USER NOT FOUND")
+        cur.execute("SELECT 1 FROM dm_blocked WHERE (blocker=%s AND blocked=%s) OR (blocker=%s AND blocked=%s)", (u,to,to,u))
+        if cur.fetchone(): return err("CANNOT MESSAGE THIS USER")
+        cur.execute("INSERT INTO messages(sender,recipient,content_enc) VALUES(%s,%s,%s)", (u, to, enc(content)))
     send_push(to, f"DM from {u}", content[:80], tag="dm")
     return ok()
 @app.route("/api/dm/delete", methods=["POST"])
@@ -1203,7 +1444,8 @@ def api_dm_delete():
     if not other: return err("MISSING USERNAME")
     u = me()
     with db() as con:
-        con.execute("DELETE FROM messages WHERE (sender=? AND recipient=?) OR (sender=? AND recipient=?)", (u,other,other,u))
+        cur = con.cursor()
+        cur.execute("DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)", (u,other,other,u))
     return ok()
 @app.route("/api/dm/block", methods=["POST"])
 def api_dm_block():
@@ -1212,14 +1454,17 @@ def api_dm_block():
     if not other: return err("MISSING USERNAME")
     u = me()
     with db() as con:
-        con.execute("INSERT OR IGNORE INTO dm_blocked(blocker,blocked) VALUES(?,?)", (u, other))
-        con.execute("DELETE FROM messages WHERE (sender=? AND recipient=?) OR (sender=? AND recipient=?)", (u,other,other,u))
+        cur = con.cursor()
+        cur.execute("INSERT INTO dm_blocked(blocker,blocked) VALUES(%s,%s) ON CONFLICT DO NOTHING", (u, other))
+        cur.execute("DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)", (u,other,other,u))
     return ok()
 @app.route("/api/dm/unblock", methods=["POST"])
 def api_dm_unblock():
     if e := require_login(): return e
     other = (request.json or {}).get("username","").strip()
-    with db() as con: con.execute("DELETE FROM dm_blocked WHERE blocker=? AND blocked=?", (me(), other))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("DELETE FROM dm_blocked WHERE blocker=%s AND blocked=%s", (me(), other))
     return ok()
 # ── GROUPS ────────────────────────────────────────────────────────────────────
 @app.route("/api/groups")
@@ -1227,9 +1472,13 @@ def api_groups():
     if not logged_in(): return jsonify({"ok": False})
     u = me()
     with db() as con:
-        rows    = con.execute("SELECT id,name,locked FROM groups ORDER BY id ASC").fetchall()
-        members = {r[0] for r in con.execute("SELECT group_id FROM group_members WHERE username=?", (u,)).fetchall()}
-        banned  = {r[0] for r in con.execute("SELECT group_id FROM group_banned WHERE username=?", (u,)).fetchall()}
+        cur = con.cursor()
+        cur.execute("SELECT id,name,locked FROM groups ORDER BY id ASC")
+        rows = cur.fetchall()
+        cur.execute("SELECT group_id FROM group_members WHERE username=%s", (u,))
+        members = {r[0] for r in cur.fetchall()}
+        cur.execute("SELECT group_id FROM group_banned WHERE username=%s", (u,))
+        banned  = {r[0] for r in cur.fetchall()}
         rat     = read_at_map(con, u, 'group')
         unread  = {r[0]: unread_count(con, 'group_messages', 'group_id', r[0], u, rat.get(str(r[0]), '1970-01-01')) for r in rows}
     return ok(groups=[{"id": r[0], "name": r[1], "member": r[0] in members, "locked": bool(r[2]),
@@ -1242,26 +1491,35 @@ def api_group_create():
     try:
         with db() as con:
             cur = con.cursor()
-            cur.execute("INSERT INTO groups(name,created_by) VALUES(?,?)", (name, me()))
-            gid = cur.lastrowid
-            for (uname,) in con.execute("SELECT username FROM users").fetchall():
-                cur.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, uname))
+            cur.execute("INSERT INTO groups(name,created_by) VALUES(%s,%s) RETURNING id", (name, me()))
+            gid = cur.fetchone()[0]
+            cur.execute("SELECT username FROM users")
+            for (uname,) in cur.fetchall():
+                cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, uname))
         return ok(id=gid)
-    except sqlite3.IntegrityError:
+    except psycopg2.errors.UniqueViolation:
         return err("CHANNEL NAME TAKEN")
 @app.route("/api/groups/<int:gid>/messages")
 def api_group_messages(gid):
     if not logged_in(): return jsonify({"ok": False})
     u = me(); admin = is_admin(u)
     with db() as con:
-        banned = con.execute("SELECT 1 FROM group_banned WHERE group_id=? AND username=?", (gid, u)).fetchone()
-        member = con.execute("SELECT 1 FROM group_members WHERE group_id=? AND username=?", (gid, u)).fetchone()
+        cur = con.cursor()
+        cur.execute("SELECT 1 FROM group_banned WHERE group_id=%s AND username=%s", (gid, u))
+        banned = cur.fetchone()
+        cur.execute("SELECT 1 FROM group_members WHERE group_id=%s AND username=%s", (gid, u))
+        member = cur.fetchone()
         if not banned and not member:
-            con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, u))
+            cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, u))
             member = True
-        group   = con.execute("SELECT locked FROM groups WHERE id=?", (gid,)).fetchone()
-        rows    = con.execute("SELECT sender,content_enc,timestamp FROM group_messages WHERE group_id=? ORDER BY timestamp ASC LIMIT 100", (gid,)).fetchall()
-        members_list = [r[0] for r in con.execute("SELECT username FROM group_members WHERE group_id=? ORDER BY username", (gid,)).fetchall()] if admin else []
+        cur.execute("SELECT locked FROM groups WHERE id=%s", (gid,))
+        group = cur.fetchone()
+        cur.execute("SELECT sender,content_enc,timestamp FROM group_messages WHERE group_id=%s ORDER BY timestamp ASC LIMIT 100", (gid,))
+        rows = cur.fetchall()
+        members_list = []
+        if admin:
+            cur.execute("SELECT username FROM group_members WHERE group_id=%s ORDER BY username", (gid,))
+            members_list = [r[0] for r in cur.fetchall()]
     is_member = admin or (bool(member) and not bool(banned))
     return ok(me=u, member=is_member, locked=bool(group and group[0]), admin=admin, members=members_list,
               messages=dec_messages(rows))
@@ -1273,14 +1531,20 @@ def api_group_send():
     if not content: return err("EMPTY MESSAGE")
     u = me()
     with db() as con:
-        if not con.execute("SELECT 1 FROM group_members WHERE group_id=? AND username=?", (gid, u)).fetchone(): return err("NOT A MEMBER")
+        cur = con.cursor()
+        cur.execute("SELECT 1 FROM group_members WHERE group_id=%s AND username=%s", (gid, u))
+        if not cur.fetchone(): return err("NOT A MEMBER")
         if not is_admin(u):
-            g = con.execute("SELECT locked FROM groups WHERE id=?", (gid,)).fetchone()
+            cur.execute("SELECT locked FROM groups WHERE id=%s", (gid,))
+            g = cur.fetchone()
             if g and g[0]: return err("CHANNEL IS LOCKED")
-        con.execute("INSERT INTO group_messages(group_id,sender,content_enc) VALUES(?,?,?)", (gid, u, enc(content)))
+        cur.execute("INSERT INTO group_messages(group_id,sender,content_enc) VALUES(%s,%s,%s)", (gid, u, enc(content)))
     with db() as con2:
-        gname   = con2.execute("SELECT name FROM groups WHERE id=?", (gid,)).fetchone()
-        members = [r[0] for r in con2.execute("SELECT username FROM group_members WHERE group_id=? AND username!=?", (gid, u)).fetchall()]
+        cur2 = con2.cursor()
+        cur2.execute("SELECT name FROM groups WHERE id=%s", (gid,))
+        gname = cur2.fetchone()
+        cur2.execute("SELECT username FROM group_members WHERE group_id=%s AND username!=%s", (gid, u))
+        members = [r[0] for r in cur2.fetchall()]
     gname = gname[0] if gname else "GROUP"
     for member in members: send_push(member, f"#{gname}", f"{u}: {content[:60]}", tag=f"group-{gid}")
     return ok()
@@ -1289,7 +1553,9 @@ def api_group_kick():
     if e := require_admin(): return e
     d = request.json; gid, target = d.get("group_id"), d.get("username","").strip()
     if not gid or not target: return err("MISSING FIELDS")
-    with db() as con: con.execute("DELETE FROM group_members WHERE group_id=? AND username=?", (gid, target))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("DELETE FROM group_members WHERE group_id=%s AND username=%s", (gid, target))
     return ok()
 @app.route("/api/groups/ban", methods=["POST"])
 def api_group_ban():
@@ -1297,26 +1563,33 @@ def api_group_ban():
     d = request.json; gid, target = d.get("group_id"), d.get("username","").strip()
     if not gid or not target: return err("MISSING FIELDS")
     with db() as con:
-        con.execute("DELETE FROM group_members WHERE group_id=? AND username=?", (gid, target))
-        con.execute("INSERT OR IGNORE INTO group_banned(group_id,username) VALUES(?,?)", (gid, target))
+        cur = con.cursor()
+        cur.execute("DELETE FROM group_members WHERE group_id=%s AND username=%s", (gid, target))
+        cur.execute("INSERT INTO group_banned(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, target))
     return ok()
 @app.route("/api/groups/unban", methods=["POST"])
 def api_group_unban():
     if e := require_admin(): return e
     d = request.json; gid, target = d.get("group_id"), d.get("username","").strip()
     with db() as con:
-        con.execute("DELETE FROM group_banned WHERE group_id=? AND username=?", (gid, target))
-        con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, target))
+        cur = con.cursor()
+        cur.execute("DELETE FROM group_banned WHERE group_id=%s AND username=%s", (gid, target))
+        cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, target))
     return ok()
 @app.route("/api/groups/join", methods=["POST"])
 def api_group_join():
     if not logged_in(): return jsonify({"ok": False})
-    with db() as con: con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (request.json.get("group_id"), me()))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",
+                    (request.json.get("group_id"), me()))
     return ok()
 @app.route("/api/groups/leave", methods=["POST"])
 def api_group_leave():
     if not logged_in(): return jsonify({"ok": False})
-    with db() as con: con.execute("DELETE FROM group_members WHERE group_id=? AND username=?", (request.json.get("group_id"), me()))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("DELETE FROM group_members WHERE group_id=%s AND username=%s", (request.json.get("group_id"), me()))
     return ok()
 @app.route("/api/group/rename", methods=["POST"])
 def api_group_rename():
@@ -1324,7 +1597,9 @@ def api_group_rename():
     d = request.json or {}; gid, name = d.get("id"), d.get("name","").strip().upper()
     if not gid or not name: return err("MISSING FIELDS")
     try:
-        with db() as con: con.execute("UPDATE groups SET name=? WHERE id=?", (name, gid))
+        with db() as con:
+            cur = con.cursor()
+            cur.execute("UPDATE groups SET name=%s WHERE id=%s", (name, gid))
         return ok()
     except: return err("NAME TAKEN")
 # ── PRIVATE ROOMS ─────────────────────────────────────────────────────────────
@@ -1333,8 +1608,12 @@ def api_private_rooms():
     if e := require_login(): return e
     u = me(); admin = is_admin(u)
     with db() as con:
-        rows = con.execute("SELECT id,name FROM private_rooms ORDER BY name ASC").fetchall() if admin else \
-               con.execute("SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=? ORDER BY r.name ASC", (u,)).fetchall()
+        cur = con.cursor()
+        if admin:
+            cur.execute("SELECT id,name FROM private_rooms ORDER BY name ASC")
+        else:
+            cur.execute("SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=%s ORDER BY r.name ASC", (u,))
+        rows = cur.fetchall()
         rat    = read_at_map(con, u, 'private')
         unread = {r[0]: unread_count(con, 'private_room_messages', 'room_id', r[0], u, rat.get(str(r[0]), '1970-01-01')) for r in rows}
     return ok(rooms=[{"id": r[0], "name": r[1], "unread": unread.get(r[0], 0)} for r in rows], is_admin=admin)
@@ -1345,18 +1624,21 @@ def api_private_create():
     if not name: return err("NAME REQUIRED")
     with db() as con:
         cur = con.cursor()
-        cur.execute("INSERT INTO private_rooms(name,created_by) VALUES(?,?)", (name, me()))
-        rid = cur.lastrowid
-        cur.execute("INSERT OR IGNORE INTO private_room_members(room_id,username) VALUES(?,?)", (rid, me()))
+        cur.execute("INSERT INTO private_rooms(name,created_by) VALUES(%s,%s) RETURNING id", (name, me()))
+        rid = cur.fetchone()[0]
+        cur.execute("INSERT INTO private_room_members(room_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (rid, me()))
     return ok(id=rid)
 @app.route("/api/private/<int:rid>/messages")
 def api_private_messages(rid):
     if e := require_login(): return e
     u = me(); admin = is_admin(u)
     with db() as con:
-        if not admin and not con.execute("SELECT 1 FROM private_room_members WHERE room_id=? AND username=?", (rid, u)).fetchone():
-            return err("ACCESS DENIED")
-        rows = con.execute("SELECT sender,content_enc,timestamp FROM private_room_messages WHERE room_id=? ORDER BY timestamp ASC LIMIT 100", (rid,)).fetchall()
+        cur = con.cursor()
+        if not admin:
+            cur.execute("SELECT 1 FROM private_room_members WHERE room_id=%s AND username=%s", (rid, u))
+            if not cur.fetchone(): return err("ACCESS DENIED")
+        cur.execute("SELECT sender,content_enc,timestamp FROM private_room_messages WHERE room_id=%s ORDER BY timestamp ASC LIMIT 100", (rid,))
+        rows = cur.fetchall()
     return ok(me=u, is_admin=admin, messages=dec_messages(rows))
 @app.route("/api/private/send", methods=["POST"])
 def api_private_send():
@@ -1365,12 +1647,17 @@ def api_private_send():
     if not rid or not content: return err("MISSING FIELDS")
     u = me()
     with db() as con:
-        if not is_admin(u) and not con.execute("SELECT 1 FROM private_room_members WHERE room_id=? AND username=?", (rid, u)).fetchone():
-            return err("ACCESS DENIED")
-        con.execute("INSERT INTO private_room_messages(room_id,sender,content_enc) VALUES(?,?,?)", (rid, u, enc(content)))
+        cur = con.cursor()
+        if not is_admin(u):
+            cur.execute("SELECT 1 FROM private_room_members WHERE room_id=%s AND username=%s", (rid, u))
+            if not cur.fetchone(): return err("ACCESS DENIED")
+        cur.execute("INSERT INTO private_room_messages(room_id,sender,content_enc) VALUES(%s,%s,%s)", (rid, u, enc(content)))
     with db() as con2:
-        rname   = con2.execute("SELECT name FROM private_rooms WHERE id=?", (rid,)).fetchone()
-        members = [r[0] for r in con2.execute("SELECT username FROM private_room_members WHERE room_id=? AND username!=?", (rid, u)).fetchall()]
+        cur2 = con2.cursor()
+        cur2.execute("SELECT name FROM private_rooms WHERE id=%s", (rid,))
+        rname = cur2.fetchone()
+        cur2.execute("SELECT username FROM private_room_members WHERE room_id=%s AND username!=%s", (rid, u))
+        members = [r[0] for r in cur2.fetchall()]
     rname = rname[0] if rname else "PRIVATE"
     for member in members: send_push(member, f"🔒 {rname}", f"{u}: {content[:60]}", tag=f"private-{rid}")
     return ok()
@@ -1378,7 +1665,9 @@ def api_private_send():
 def api_private_members(rid):
     if e := require_admin(): return e
     with db() as con:
-        rows = con.execute("SELECT username FROM private_room_members WHERE room_id=? ORDER BY username", (rid,)).fetchall()
+        cur = con.cursor()
+        cur.execute("SELECT username FROM private_room_members WHERE room_id=%s ORDER BY username", (rid,))
+        rows = cur.fetchall()
     return ok(members=[r[0] for r in rows])
 @app.route("/api/private/add-member", methods=["POST"])
 def api_private_add_member():
@@ -1386,22 +1675,28 @@ def api_private_add_member():
     d = request.json or {}; rid, username = d.get("room_id"), d.get("username","").strip()
     if not rid or not username: return err("MISSING FIELDS")
     with db() as con:
-        if not con.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone(): return err("USER NOT FOUND")
-        con.execute("INSERT OR IGNORE INTO private_room_members(room_id,username) VALUES(?,?)", (rid, username))
+        cur = con.cursor()
+        cur.execute("SELECT id FROM users WHERE username=%s", (username,))
+        if not cur.fetchone(): return err("USER NOT FOUND")
+        cur.execute("INSERT INTO private_room_members(room_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (rid, username))
     return ok()
 @app.route("/api/private/remove-member", methods=["POST"])
 def api_private_remove_member():
     if e := require_admin(): return e
     d = request.json or {}; rid, username = d.get("room_id"), d.get("username","").strip()
     if not rid or not username: return err("MISSING FIELDS")
-    with db() as con: con.execute("DELETE FROM private_room_members WHERE room_id=? AND username=?", (rid, username))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("DELETE FROM private_room_members WHERE room_id=%s AND username=%s", (rid, username))
     return ok()
 @app.route("/api/private/rename", methods=["POST"])
 def api_private_rename():
     if e := require_admin(): return e
     d = request.json or {}; rid, name = d.get("id"), d.get("name","").strip().upper()
     if not rid or not name: return err("MISSING FIELDS")
-    with db() as con: con.execute("UPDATE private_rooms SET name=? WHERE id=?", (name, rid))
+    with db() as con:
+        cur = con.cursor()
+        cur.execute("UPDATE private_rooms SET name=%s WHERE id=%s", (name, rid))
     return ok()
 # ── NOTIFICATIONS ─────────────────────────────────────────────────────────────
 @app.route("/api/notifications")
@@ -1409,34 +1704,41 @@ def api_notifications():
     if e := require_login(): return e
     u = me()
     with db() as con:
+        cur = con.cursor()
         # DMs
         read_dm_at = read_at_map(con, u, 'dm')
-        dm_unread = sum(
-            con.execute("SELECT COUNT(*) FROM messages WHERE sender=? AND recipient=? AND timestamp>?",
-                        (sender, u, read_dm_at.get(sender, '1970-01-01'))).fetchone()[0]
-            for (sender,) in con.execute("SELECT DISTINCT sender FROM messages WHERE recipient=?", (u,)).fetchall()
-        )
+        cur.execute("SELECT DISTINCT sender FROM messages WHERE recipient=%s", (u,))
+        senders = [r[0] for r in cur.fetchall()]
+        dm_unread = 0
+        for sender in senders:
+            cur.execute("SELECT COUNT(*) FROM messages WHERE sender=%s AND recipient=%s AND timestamp>%s",
+                        (sender, u, read_dm_at.get(sender, '1970-01-01')))
+            dm_unread += cur.fetchone()[0]
         # Groups
-        group_rows  = con.execute("SELECT id,name FROM groups WHERE id IN (SELECT group_id FROM group_members WHERE username=?) ORDER BY id", (u,)).fetchall()
+        cur.execute("SELECT id,name FROM groups WHERE id IN (SELECT group_id FROM group_members WHERE username=%s) ORDER BY id", (u,))
+        group_rows = cur.fetchall()
         read_grp_at = read_at_map(con, u, 'group')
-        groups_unread = {
-            str(gid): {"name": gname, "count": cnt}
-            for gid, gname in group_rows
-            if (cnt := unread_count(con, 'group_messages', 'group_id', gid, u, read_grp_at.get(str(gid), '1970-01-01')))
-        }
+        groups_unread = {}
+        for gid, gname in group_rows:
+            cnt = unread_count(con, 'group_messages', 'group_id', gid, u, read_grp_at.get(str(gid), '1970-01-01'))
+            if cnt: groups_unread[str(gid)] = {"name": gname, "count": cnt}
         # Private rooms
-        priv_rows   = con.execute("SELECT id,name FROM private_rooms ORDER BY id").fetchall() if is_admin(u) else \
-                      con.execute("SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=? ORDER BY r.id", (u,)).fetchall()
+        if is_admin(u):
+            cur.execute("SELECT id,name FROM private_rooms ORDER BY id")
+        else:
+            cur.execute("SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=%s ORDER BY r.id", (u,))
+        priv_rows = cur.fetchall()
         read_prv_at = read_at_map(con, u, 'private')
-        privrooms_unread = {
-            str(rid): {"name": rname, "count": cnt}
-            for rid, rname in priv_rows
-            if (cnt := unread_count(con, 'private_room_messages', 'room_id', rid, u, read_prv_at.get(str(rid), '1970-01-01')))
-        }
+        privrooms_unread = {}
+        for rid, rname in priv_rows:
+            cnt = unread_count(con, 'private_room_messages', 'room_id', rid, u, read_prv_at.get(str(rid), '1970-01-01'))
+            if cnt: privrooms_unread[str(rid)] = {"name": rname, "count": cnt}
         # Posts
-        posts_read = con.execute("SELECT read_at FROM chat_read_at WHERE username=? AND chat_type='posts' AND chat_id='posts'", (u,)).fetchone()
-        new_posts  = con.execute("SELECT COUNT(*) FROM posts WHERE username!=? AND created_at>?",
-                                 (u, posts_read[0] if posts_read else '1970-01-01')).fetchone()[0]
+        cur.execute("SELECT read_at FROM chat_read_at WHERE username=%s AND chat_type='posts' AND chat_id='posts'", (u,))
+        posts_read = cur.fetchone()
+        cur.execute("SELECT COUNT(*) FROM posts WHERE username!=%s AND created_at>%s",
+                    (u, posts_read[0] if posts_read else '1970-01-01'))
+        new_posts = cur.fetchone()[0]
     group_total = sum(v["count"] for v in groups_unread.values())
     priv_total  = sum(v["count"] for v in privrooms_unread.values())
     return ok(dm=dm_unread, groups=groups_unread, group=group_total,
@@ -1450,10 +1752,12 @@ def api_mark_read():
     if not chat_type or not chat_id: return err("MISSING FIELDS")
     now = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     with db() as con:
-        con.execute("INSERT OR REPLACE INTO chat_read_at(username,chat_type,chat_id,read_at) VALUES(?,?,?,?)",
+        cur = con.cursor()
+        cur.execute("INSERT INTO chat_read_at(username,chat_type,chat_id,read_at) VALUES(%s,%s,%s,%s) "
+                    "ON CONFLICT (username,chat_type,chat_id) DO UPDATE SET read_at=EXCLUDED.read_at",
                     (me(), chat_type, chat_id, now))
         if chat_type == "dm":
-            con.execute("UPDATE messages SET read=1 WHERE recipient=? AND sender=?", (me(), chat_id))
+            cur.execute("UPDATE messages SET read=1 WHERE recipient=%s AND sender=%s", (me(), chat_id))
     return ok()
 # ── PASSWORD RESET ────────────────────────────────────────────────────────────
 @app.route("/api/reset/request", methods=["POST"])
@@ -1461,9 +1765,12 @@ def api_reset_request():
     username = (request.json or {}).get("username","").strip()
     if not username: return err("USERNAME REQUIRED")
     with db() as con:
-        if not con.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone(): return err("USERNAME NOT FOUND")
-        if con.execute("SELECT id FROM password_resets WHERE username=? AND status='pending'", (username,)).fetchone(): return ok()
-        con.execute("INSERT INTO password_resets(username) VALUES(?)", (username,))
+        cur = con.cursor()
+        cur.execute("SELECT id FROM users WHERE username=%s", (username,))
+        if not cur.fetchone(): return err("USERNAME NOT FOUND")
+        cur.execute("SELECT id FROM password_resets WHERE username=%s AND status='pending'", (username,))
+        if cur.fetchone(): return ok()
+        cur.execute("INSERT INTO password_resets(username) VALUES(%s)", (username,))
     return ok()
 # ── PUSH ──────────────────────────────────────────────────────────────────────
 @app.route("/api/push/vapid-public-key")
@@ -1476,7 +1783,9 @@ def api_push_subscribe():
     endpoint = d.get("endpoint",""); p256dh = d.get("keys",{}).get("p256dh",""); auth = d.get("keys",{}).get("auth","")
     if not endpoint or not p256dh or not auth: return err("MISSING FIELDS")
     with db() as con:
-        con.execute("INSERT OR REPLACE INTO push_subscriptions(username,endpoint,p256dh,auth) VALUES(?,?,?,?)",
+        cur = con.cursor()
+        cur.execute("INSERT INTO push_subscriptions(username,endpoint,p256dh,auth) VALUES(%s,%s,%s,%s) "
+                    "ON CONFLICT (username,endpoint) DO UPDATE SET p256dh=EXCLUDED.p256dh, auth=EXCLUDED.auth",
                     (me(), endpoint, p256dh, auth))
     return ok()
 @app.route("/api/push/unsubscribe", methods=["POST"])
@@ -1484,7 +1793,9 @@ def api_push_unsubscribe():
     if e := require_login(): return e
     endpoint = (request.json or {}).get("endpoint","")
     if endpoint:
-        with db() as con: con.execute("DELETE FROM push_subscriptions WHERE username=? AND endpoint=?", (me(), endpoint))
+        with db() as con:
+            cur = con.cursor()
+            cur.execute("DELETE FROM push_subscriptions WHERE username=%s AND endpoint=%s", (me(), endpoint))
     return ok()
 # ── MISC ROUTES ───────────────────────────────────────────────────────────────
 @app.route("/api/ask", methods=["POST"])
@@ -1542,7 +1853,8 @@ def icon_512(): return _svg_icon(512, 285, 90, sub_y=325, sub_text="VOX POPULI")
 def emergency_reset():
     new_pw = "Vox2024!"
     with db() as con:
-        con.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_pw(new_pw), ADMIN_USER))
+        cur = con.cursor()
+        cur.execute("UPDATE users SET password_hash=%s WHERE username=%s", (hash_pw(new_pw), ADMIN_USER))
     return "<h1 style='font-family:monospace;background:#000;color:#0f0;padding:40px;'>DONE! Login: Eagleone / Vox2024! — CHANGE YOUR PASSWORD AFTER LOGGING IN.</h1>"
 @app.errorhandler(Exception)
 def handle_exception(e):
