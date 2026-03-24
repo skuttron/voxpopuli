@@ -1762,7 +1762,7 @@ def api_dm_send():
     if not to or not content: return err("FIELDS REQUIRED")
     u = me()
     with db() as con:
-        if not con.execute("SELECT id FROM users WHERE username=?", (to,)).fetchone(): return err("USER NOT FOUND")
+        if not con.execute("SELECT id FROM users WHERE username=%s", (to,)).fetchone(): return err("USER NOT FOUND")
         if con.execute("SELECT 1 FROM dm_blocked WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)", (u,to,to,u)).fetchone(): return err("CANNOT MESSAGE THIS USER")
         con.execute("INSERT INTO messages(sender,recipient,content_enc) VALUES(?,?,?)", (u, to, enc(content)))
     send_push(to, f"DM from {u}", content[:80], tag="dm")
