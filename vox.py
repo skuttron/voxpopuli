@@ -1,18 +1,43 @@
 # -*- coding: utf-8 -*-
 from flask import Flask, request, session, redirect, jsonify, Response
-import sqlite3, os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
-from contextlib import contextmanager
+import os
+import pathlib
+import datetime
+import psycopg2
+from flask import Flask
+from flask_bcrypt import Bcrypt
+from psycopg2.extras import RealDictCursor
 from cryptography.fernet import Fernet
 
 _BASE = pathlib.Path(__file__).parent.resolve()
 app = Flask(__name__)
-SECRET_KEY_FILE = str(_BASE/"secret_key.txt")
-if not os.path.exists(SECRET_KEY_FILE):
-    open(SECRET_KEY_FILE,"w").write("1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38")
-app.secret_key = open(SECRET_KEY_FILE,"r").read().strip() or "1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38"
+
+# --- DATABASE SETUP (Railway) ---
+# Ensure you have a DATABASE_URL variable set in your Railway 'Variables' tab
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+def get_db_connection():
+    # Use sslmode='require' for Railway connections
+    return psycopg2.connect(DATABASE_URL, sslmode='require')
+
+# --- SECURITY & BCRYPT ---
+bcrypt = Bcrypt(app)
+
+# Fallback for local dev, but Railway should provide this via env var
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38")
 app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(days=90)
 app.config['SESSION_PERMANENT'] = True
-DB, ADMIN_USER, KEY_FILE = str(_BASE/"ogl.db"), "Eagleone", str(_BASE/"secret.key")
+
+# Fernet encryption for data (not passwords)
+KEY_FILE = str(_BASE/"secret.key")
+if not os.path.exists(KEY_FILE): 
+    with open(KEY_FILE,"wb") as f: f.write(Fernet.generate_key())
+fernet = Fernet(open(KEY_FILE,"rb").read())
+
+# --- VAPID KEYS ---
+VAPID_PUBLIC_KEY  = os.environ.get("VAPID_PUBLIC_KEY",  "BAyH6Y_hbhzzmRgt3pd5Qa7guYKYKfsVCVIZsJGF0zYPfBupcKm24bduVIj4585JSjeeu3aeR19d4tBzlHgQIdU")
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOqLakrDhZhnH_KBh5nwx2l0jyGfOWplqyE82s4Ryws2hRANCAAQMh-mP4W4c85kYLd6XeUGu4LmCmCn7FQlSGbCRhdM2D3wbqXCptuG3blSI-OfOSUo3nrt2nkdfXeLQc5R4ECHV")
+VAPID_CLAIMS      = {"sub": "mailto:admin@voxpopuli.app"}
 
 if not os.path.exists(KEY_FILE): open(KEY_FILE,"wb").write(Fernet.generate_key())
 fernet = Fernet(open(KEY_FILE,"rb").read())
