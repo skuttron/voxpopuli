@@ -63,6 +63,7 @@ NAV_ITEMS = [
 
 @contextmanager
 def db():
+    # Ensure DATABASE_URL is set in Railway Variables
     con = psycopg2.connect(os.environ.get('DATABASE_URL'))
     try:
         yield con
@@ -72,40 +73,73 @@ def db():
 
 def init_db():
     with db() as con:
-        con.cursor().executescript("""
-        CREATE TABLE IF NOT EXISTS users(id SERIAL PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,theme TEXT DEFAULT 'green',is_admin INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,sender TEXT NOT NULL,recipient TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP,read INTEGER DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS groups(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE NOT NULL,created_by TEXT NOT NULL,locked INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        cur = con.cursor()
+        # Use SERIAL for auto-increment and execute() instead of executescript()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS users(id SERIAL PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,theme TEXT DEFAULT 'green',is_admin INTEGER DEFAULT 0,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS messages(id SERIAL PRIMARY KEY,sender TEXT NOT NULL,recipient TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,read INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS groups(id SERIAL PRIMARY KEY,name TEXT UNIQUE NOT NULL,created_by TEXT NOT NULL,locked INTEGER DEFAULT 0,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS group_members(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username));
-        CREATE TABLE IF NOT EXISTS group_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,group_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS visits(id INTEGER PRIMARY KEY AUTOINCREMENT,date TEXT NOT NULL,ip TEXT NOT NULL,UNIQUE(date,ip));
-        CREATE TABLE IF NOT EXISTS active_users(ip TEXT PRIMARY KEY,last_seen TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS user_sessions(username TEXT PRIMARY KEY,last_seen TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS group_messages(id SERIAL PRIMARY KEY,group_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS visits(id SERIAL PRIMARY KEY,date TEXT NOT NULL,ip TEXT NOT NULL,UNIQUE(date,ip));
+        CREATE TABLE IF NOT EXISTS active_users(ip TEXT PRIMARY KEY,last_seen TIMESTAMP NOT NULL);
+        CREATE TABLE IF NOT EXISTS user_sessions(username TEXT PRIMARY KEY,last_seen TIMESTAMP NOT NULL);
         CREATE TABLE IF NOT EXISTS chat_read_at(username TEXT NOT NULL,chat_type TEXT NOT NULL,chat_id TEXT NOT NULL,read_at TEXT NOT NULL,PRIMARY KEY(username,chat_type,chat_id));
         CREATE TABLE IF NOT EXISTS group_banned(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username));
         CREATE TABLE IF NOT EXISTS dm_blocked(blocker TEXT NOT NULL,blocked TEXT NOT NULL,PRIMARY KEY(blocker,blocked));
-        CREATE TABLE IF NOT EXISTS posts(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,content TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS posts(id SERIAL PRIMARY KEY,username TEXT NOT NULL,content TEXT NOT NULL,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS post_reactions(post_id INTEGER NOT NULL,username TEXT NOT NULL,emoji TEXT NOT NULL,PRIMARY KEY(post_id,username));
-        CREATE TABLE IF NOT EXISTS private_rooms(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS private_rooms(id SERIAL PRIMARY KEY,name TEXT NOT NULL,created_by TEXT NOT NULL,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS private_room_members(room_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(room_id,username));
-        CREATE TABLE IF NOT EXISTS private_room_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,room_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS private_room_messages(id SERIAL PRIMARY KEY,room_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS push_subscriptions(username TEXT NOT NULL,endpoint TEXT NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,PRIMARY KEY(username,endpoint));
-        CREATE TABLE IF NOT EXISTS password_resets(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,temp_password TEXT,status TEXT DEFAULT 'pending',requested_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS password_resets(id SERIAL PRIMARY KEY,username TEXT NOT NULL,temp_password TEXT,status TEXT DEFAULT 'pending',requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
         """)
-        c = con.cursor()
-        c.execute("UPDATE chat_read_at SET read_at = replace(substr(read_at,1,19),'T',' ') WHERE read_at LIKE '%T%'")
-        c.execute("UPDATE users SET is_admin=1 WHERE username=%s", (ADMIN_USER,))
+        
+        # Fixed placeholders (? -> %s) and LIKE escape (%%)
+        cur.execute("UPDATE chat_read_at SET read_at = replace(substr(read_at,1,19),'T',' ') WHERE read_at LIKE '%%T%%'")
+        cur.execute("UPDATE users SET is_admin=1 WHERE username=%s", (ADMIN_USER,))
+        
         for ch in ["GENERAL", "SURVIVAL", "BARTER", "HOMESTEAD"]:
-            c.execute("INSERT OR IGNORE INTO groups(name,created_by) VALUES(?,?)", (ch, "SYSTEM"))
-        users  = [r[0] for r in c.execute("SELECT username FROM users").fetchall()]
-        groups = [r[0] for r in c.execute("SELECT id FROM groups").fetchall()]
-        banned = {(r[0], r[1]) for r in c.execute("SELECT group_id,username FROM group_banned").fetchall()}
+            cur.execute("INSERT INTO groups(name,created_by) VALUES(%s,%s) ON CONFLICT (name) DO NOTHING", (ch, "SYSTEM"))
+        
+        cur.execute("SELECT username FROM users")
+        users = [r[0] for r in cur.fetchall()]
+        cur.execute("SELECT id FROM groups")
+        groups = [r[0] for r in cur.fetchall()]
+        cur.execute("SELECT group_id,username FROM group_banned")
+        banned = {(r[0], r[1]) for r in cur.fetchall()}
+        
         for gid in groups:
             for uname in users:
                 if (gid, uname) not in banned:
-                    c.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)", (gid, uname))
+                    cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, uname))
 
 init_db()
+
+# ── UPDATED HELPERS ──────────────────────────────────────────────────────────
+
+@app.before_request
+def track_visit():
+    if request.path.startswith(("/api", "/static")): return
+    now = utc_now()
+    with db() as con:
+        cur = con.cursor()
+        # PostgreSQL: Use ON CONFLICT DO NOTHING instead of INSERT OR IGNORE
+        cur.execute("INSERT INTO visits(date,ip) VALUES(%s,%s) ON CONFLICT DO NOTHING", (datetime.date.today().isoformat(), get_ip()))
+        u = session.get("username")
+        if u: 
+            # PostgreSQL: Use ON CONFLICT DO UPDATE instead of INSERT OR REPLACE
+            cur.execute("""
+                INSERT INTO user_sessions(username,last_seen) VALUES(%s,%s) 
+                ON CONFLICT (username) DO UPDATE SET last_seen = EXCLUDED.last_seen
+            """, (u, now))
+
+def unread_count(con, table, id_col, id_val, username, cutoff):
+    cur = con.cursor()
+    # Fixed placeholders (? -> %s)
+    cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {id_col}=%s AND sender!=%s AND timestamp>%s", (id_val, username, cutoff))
+    return cur.fetchone()[0]
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 
