@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from flask import Flask, request, session, redirect, jsonify, Response
-import psycop2, os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
+import psycopg2, os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
 from contextlib import contextmanager
 
 from cryptography.fernet import Fernet
