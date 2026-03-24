@@ -2030,7 +2030,7 @@ def api_notifications():
             if (cnt := unread_count(con, 'private_room_messages', 'room_id', rid, u, read_prv_at.get(str(rid), '1970-01-01')))
         }
         # Posts
-        posts_read = con.execute("SELECT read_at FROM chat_read_at WHERE username=? AND chat_type='posts' AND chat_id='posts'", (u,)).fetchone()
+        posts_read = con.execute("SELECT read_at FROM chat_read_at WHERE username=%s AND chat_type='posts' AND chat_id='posts'", (u,)).fetchone()
         new_posts  = con.execute("SELECT COUNT(*) FROM posts WHERE username!=%s AND created_at>?",
                                  (u, posts_read[0] if posts_read else '1970-01-01')).fetchone()[0]
 
