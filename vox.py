@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 from flask import Flask, request, session, redirect, jsonify, Response
 import sqlite3, os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
@@ -1905,11 +1906,16 @@ def api_group_messages(gid):
     if not logged_in(): return jsonify({"ok":False})
     u = me(); admin = is_admin(u)
     with db() as con:
+        banned = con.execute("SELECT 1 FROM group_banned WHERE group_id=? AND username=?",(gid,u)).fetchone()
         member = con.execute("SELECT 1 FROM group_members WHERE group_id=? AND username=?",(gid,u)).fetchone()
+        if not banned and not member:
+            con.execute("INSERT OR IGNORE INTO group_members(group_id,username) VALUES(?,?)",(gid,u))
+            member = True
         group  = con.execute("SELECT locked FROM groups WHERE id=?",(gid,)).fetchone()
         rows   = con.execute("SELECT sender,content_enc,timestamp FROM group_messages WHERE group_id=? ORDER BY timestamp ASC LIMIT 100",(gid,)).fetchall()
         members_list = [r[0] for r in con.execute("SELECT username FROM group_members WHERE group_id=? ORDER BY username",(gid,)).fetchall()] if admin else []
-    return ok(me=u,member=bool(member),locked=bool(group and group[0]),admin=admin,members=members_list,
+    is_member = admin or (bool(member) and not bool(banned))
+    return ok(me=u,member=is_member,locked=bool(group and group[0]),admin=admin,members=members_list,
         messages=[{"sender":r[0],"content":dec(r[1]),"timestamp":r[2]} for r in rows])
 
 @app.route("/api/groups/send", methods=["POST"])
