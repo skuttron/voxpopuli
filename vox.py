@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-from flask import Flask, request, session, redirect, jsonify
-import sqlite3, os, hashlib, secrets, datetime, urllib.parse, urllib.request, re, html as _html, pathlib
+from flask import Flask, request, session, redirect, jsonify, Response
+import sqlite3, os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
 from contextlib import contextmanager
 from cryptography.fernet import Fernet
 
@@ -23,12 +23,8 @@ VAPID_CLAIMS      = {"sub": "mailto:admin@voxpopuli.app"}
 
 hash_pw = lambda pw: hashlib.sha256(pw.encode()).hexdigest()
 
-def get_vapid_keys():
-    return {"public_b64": VAPID_PUBLIC_KEY, "private": VAPID_PRIVATE_KEY}
-
 def send_push(username, title, body, tag="vox"):
     try:
-        import json as _j
         from pywebpush import webpush, WebPushException
         with db() as con:
             subs = con.execute("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE username=?",(username,)).fetchall()
@@ -36,7 +32,7 @@ def send_push(username, title, body, tag="vox"):
             try:
                 webpush(
                     subscription_info={"endpoint":endpoint,"keys":{"p256dh":p256dh,"auth":auth}},
-                    data=_j.dumps({"title":title,"body":body,"tag":tag}),
+                    data=_json.dumps({"title":title,"body":body,"tag":tag}),
                     vapid_private_key=VAPID_PRIVATE_KEY,
                     vapid_claims=VAPID_CLAIMS
                 )
@@ -45,8 +41,6 @@ def send_push(username, title, body, tag="vox"):
                     if hasattr(ex,'response') and ex.response and ex.response.status_code in (404,410):
                         with db() as con: con.execute("DELETE FROM push_subscriptions WHERE endpoint=?",(endpoint,))
                 except: pass
-    except ImportError:
-        pass  # pywebpush not installed
     except: pass
 enc = lambda t: fernet.encrypt(t.encode()).decode()
 dec = lambda t: (lambda: fernet.decrypt(t.encode()).decode() if t else "[DECRYPTION FAILED]")() if t else ""
@@ -83,7 +77,6 @@ def init_db():
         for col,tbl in [("is_admin INTEGER DEFAULT 0","users"),("locked INTEGER DEFAULT 0","groups")]:
             try: c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col}")
             except: pass
-        # Fix any chat_read_at rows with ISO format timestamps (T separator) — convert to SQLite format
         c.execute("UPDATE chat_read_at SET read_at = replace(substr(read_at,1,19),'T',' ') WHERE read_at LIKE '%T%'")
         c.execute("UPDATE users SET is_admin=1 WHERE username=?",(ADMIN_USER,))
         for ch in ["GENERAL","SURVIVAL","BARTER","HOMESTEAD"]:
@@ -290,9 +283,7 @@ def shell(content, user=None, theme="green", unread=0):
     t = THEMES.get(theme, THEMES["green"])
     admin = is_admin(user)
     if user:
-        ub = f'<span class="unread-badge">{unread}</span>' if unread else '<span class="unread-badge" style="background:transparent;border:1.5px solid var(--p);color:var(--p);opacity:.6;">0</span>'
         at = f' <span class="admin-badge">&#9733; ADMIN</span>' if admin else ''
-        ai = ''
         menu_html = f'''<div class="menu-wrap">
             <div class="menu-trigger" onclick="event.stopPropagation();document.getElementById('accountMenu').classList.toggle('open')" style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:8px;">
               <span style="font-size:16px;">&#9776;</span>
@@ -1695,7 +1686,7 @@ def api_admin_traffic():
 @app.route("/api/news")
 def api_news():
     if not logged_in(): return err("LOGIN REQUIRED")
-    import json as _json, random
+    import random
     items = []
     seen_titles = set()
     feed_type = request.args.get("type", "offgrid")
@@ -2137,7 +2128,6 @@ def api_mark_read():
 @app.route("/api/ask", methods=["POST"])
 def api_ask():
     if not logged_in(): return err("LOGIN REQUIRED")
-    import json as _json
     query = (request.json or {}).get("query","").strip()
     if not query: return err("EMPTY QUERY")
     api_key = os.environ.get("GEMINI_API_KEY","")
@@ -2188,7 +2178,6 @@ def api_group_leave():
 
 @app.route("/manifest.json")
 def manifest():
-    import json as _json
     data = {
         "name": "Vox Populi",
         "short_name": "VOX",
@@ -2205,7 +2194,6 @@ def manifest():
         "categories": ["social", "news"],
         "shortcuts": [{"name": "Chat", "url": "/", "description": "Open Vox community chat"}]
     }
-    from flask import Response
     return Response(_json.dumps(data), mimetype="application/json")
 
 @app.route("/sw.js")
@@ -2255,7 +2243,6 @@ self.addEventListener('notificationclick', e => {
   );
 });
 """
-    from flask import Response
     return Response(sw, mimetype="application/javascript")
 
 @app.route("/icon-192.png")
@@ -2268,10 +2255,8 @@ def icon_192():
 </svg>'''
     try:
         import cairosvg
-        from flask import Response
         return Response(cairosvg.svg2png(bytestring=svg, output_width=192, output_height=192), mimetype="image/png")
     except:
-        from flask import Response
         return Response(svg, mimetype="image/svg+xml")
 
 @app.route("/icon-512.png")
@@ -2285,10 +2270,8 @@ def icon_512():
 </svg>'''
     try:
         import cairosvg
-        from flask import Response
         return Response(cairosvg.svg2png(bytestring=svg, output_width=512, output_height=512), mimetype="image/png")
     except:
-        from flask import Response
         return Response(svg, mimetype="image/svg+xml")
 
 
@@ -2300,7 +2283,6 @@ def api_reset_request():
     with db() as con:
         if not con.execute("SELECT id FROM users WHERE username=?",(username,)).fetchone():
             return err("USERNAME NOT FOUND")
-        # Don't allow duplicate pending requests
         existing = con.execute("SELECT id FROM password_resets WHERE username=? AND status='pending'",(username,)).fetchone()
         if existing: return ok()  # silently ok so user knows to wait
         con.execute("INSERT INTO password_resets(username) VALUES(?)",(username,))
@@ -2324,9 +2306,7 @@ def api_admin_reset_approve():
         row = con.execute("SELECT username FROM password_resets WHERE id=?",(rid,)).fetchone()
         if not row: return err("REQUEST NOT FOUND")
         username = row[0]
-        # Set the temp password on the user account
         con.execute("UPDATE users SET password_hash=? WHERE username=?",(hash_pw(temp_pw),username))
-        # Mark request as approved and store temp pw so admin can see it
         con.execute("UPDATE password_resets SET status='approved',temp_password=? WHERE id=?",(temp_pw,rid))
     return ok()
 
@@ -2341,9 +2321,7 @@ def api_admin_reset_deny():
 
 @app.route("/api/push/vapid-public-key")
 def api_vapid_public_key():
-    keys = get_vapid_keys()
-    if not keys: return err("PUSH NOT CONFIGURED")
-    return ok(key=keys.get("public_b64",""))
+    return ok(key=VAPID_PUBLIC_KEY)
 
 @app.route("/api/push/subscribe", methods=["POST"])
 def api_push_subscribe():
@@ -2369,7 +2347,6 @@ def api_push_unsubscribe():
 
 @app.route("/reset-x7k9m2p4q8w3n6j1vb5")
 def emergency_reset():
-    import hashlib
     new_pw = "Vox2024!"
     with db() as con:
         con.execute("UPDATE users SET password_hash=? WHERE username=?",(hashlib.sha256(new_pw.encode()).hexdigest(),"Eagleone"))
