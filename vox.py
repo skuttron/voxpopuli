@@ -1373,34 +1373,26 @@ def manifest():
 def service_worker():
     sw = """
     const CACHE = 'vox-v1';
-    self.addEventListener('install', e => self.skipWaiting());
-    self.addEventListener('activate', e => e.waitUntil(clients.claim()));
+    self.addEventListener('install', e => { self.skipWaiting(); });
+    self.addEventListener('activate', e => { e.waitUntil(clients.claim()); });
+    
     self.addEventListener('fetch', e => {
         if(e.request.method !== 'GET' || e.request.url.includes('/api/')) return;
         e.respondWith(caches.match(e.request).then(res => res || fetch(e.request)));
     });
 
     self.addEventListener('push', e => {
-        const data = e.data ? e.data.json() : {title: 'VOX', body: 'New Message!'};
-        e.waitUntil(self.registration.showNotification(data.title, {
-            body: data.body,
-            icon: '/icon-192.png'
-        }));
-    });
-
-    self.addEventListener('notificationclick', e => {
-        e.notification.close();
-        e.waitUntil(clients.openWindow('/'));
-    });
-    """
-    return Response(sw, mimetype="application/javascript")
-
-    self.addEventListener('push', e => {
         try {
             const data = e.data ? e.data.json() : {title: 'VOX', body: 'New Message!'};
-            e.waitUntil(self.registration.showNotification(data.title, { body: data.body, icon: '/icon-192.png' }));
+            e.waitUntil(self.registration.showNotification(data.title, { 
+                body: data.body, 
+                icon: '/icon-192.png' 
+            }));
         } catch (err) {
-            e.waitUntil(self.registration.showNotification('VOX', { body: 'Check your app!', icon: '/icon-192.png' }));
+            e.waitUntil(self.registration.showNotification('VOX', { 
+                body: 'New notification received!', 
+                icon: '/icon-192.png' 
+            }));
         }
     });
 
