@@ -1373,13 +1373,31 @@ def manifest():
 # e.data.json() which crashes on non-JSON payloads.
 @app.route("/sw.js")
 def service_worker():
-    sw="""const CACHE='vox-v1';
-self.addEventListener('install',e=>{self.skipWaiting();});
-self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim();});
-self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;if(e.request.url.includes('/api/'))return;e.respondWith(fetch(e.request).then(res=>{const clone=res.clone();caches.open(CACHE).then(c=>c.put(e.request,clone));return res;}).catch(()=>caches.match(e.request).then(r=>r||Response.error())));});
-self.addEventListener('push',e=>{let data={title:'VOX',body:'New notification',tag:'vox'};try{if(e.data){const text=e.data.text();data=JSON.parse(text);}}catch(err){}e.waitUntil(self.registration.showNotification('VOX // '+data.title,{body:data.body,icon:'/icon-192.png',badge:'/icon-192.png',tag:data.tag||'vox',renotify:true,vibrate:[200,100,200],data:{url:'/'}}));});
-self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(self.location.origin)){c.focus();return;}}clients.openWindow('/');}));});"""
-    return Response(sw,mimetype="application/javascript")
+    sw = """
+    const CACHE = 'vox-v1';
+    self.addEventListener('install', e => { self.skipWaiting(); });
+    self.addEventListener('activate', e => { e.waitUntil(clients.claim().then(() => caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))))); });
+    self.addEventListener('fetch', e => { 
+        if(e.request.method !== 'GET') return; 
+        if(e.request.url.includes('/api/')) return; 
+        e.respondWith(caches.match(e.request).then(res => res || fetch(e.request))); 
+    });
+
+    self.addEventListener('push', e => {
+        try {
+            const data = e.data ? e.data.json() : {title: 'VOX', body: 'New Message!'};
+            e.waitUntil(self.registration.showNotification(data.title, { body: data.body, icon: '/icon-192.png' }));
+        } catch (err) {
+            e.waitUntil(self.registration.showNotification('VOX', { body: 'Check your app!', icon: '/icon-192.png' }));
+        }
+    });
+
+    self.addEventListener('notificationclick', e => {
+        e.notification.close();
+        e.waitUntil(clients.openWindow('/'));
+    });
+    """
+    return Response(sw, mimetype="application/javascript")
 def _svg_icon(size,text_y,font_size,sub_y=None,sub_text=None):
     txt=f'<text x="{size//2}" y="{text_y}" text-anchor="middle" font-family="monospace" font-weight="900" font-size="{font_size}" fill="#00ff00" letter-spacing="2">VOX</text>'
     sub=f'<text x="{size//2}" y="{sub_y}" text-anchor="middle" font-family="monospace" font-size="{font_size//4}" fill="#00ff00" opacity="0.6" letter-spacing="6">{sub_text}</text>' if sub_text else ''
