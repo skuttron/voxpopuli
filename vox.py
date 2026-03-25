@@ -376,23 +376,6 @@ function mobileShowChat(type){{if(!isMobile())return;const sMap={{dm:'dmSidebar'
 function mobileShowSidebar(type){{if(!isMobile())return;const sMap={{dm:'dmSidebar',group:'groupSidebar',private:'privateSidebar'}},mMap={{dm:'dmMain',group:'groupMain',private:'privateMain'}},s=$(sMap[type]),m=$(mMap[type]);if(s)s.classList.add('mobile-show');if(m)m.classList.remove('mobile-show');const b=m&&m.querySelector('.mobile-back-btn');if(b)b.style.display='none';}}
 document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('open')}}));
 document.addEventListener('click',e=>{{const menu=$('accountMenu');if(menu&&!e.target.closest('.menu-wrap'))menu.classList.remove('open');if(!e.target.closest('#newDmUser')&&!e.target.closest('#dmUserSuggest'))hideDmSuggest();const item=e.target.closest('[data-action]');if(item){{if(menu)menu.classList.remove('open');const a=item.dataset.action;if(a==='settings')openModal('settingsModal');else if(a==='login')openModal('loginModal');else if(a==='register')openModal('registerModal');}}}});
-document.getElementById('YOUR_NOTIFY_BUTTON_ID').onclick = async () => {
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: 'YOUR_PUBLIC_VAPID_KEY'
-        });
-        // This sends the data to your Python route @api_push_subscribe
-        await fetch('/api/push/subscribe', {
-            method: 'POST',
-            body: JSON.stringify(sub),
-            headers: {'Content-Type': 'application/json'}
-        });
-        alert("Notifications Active!");
-    }
-};
 async function doLogin(){{const d=await api('/api/login',{{username:$('loginUser').value.trim(),password:$('loginPass').value}});d.ok?location.reload():$('loginErr').textContent='ERROR: '+d.error;}}
 async function doRegister(){{const p=$('regPass').value,p2=$('regPass2').value,dob=$('regDob').value;if(!dob){{$('regErr').textContent='DATE OF BIRTH REQUIRED';return}}if((Date.now()-new Date(dob))/31557600000<18){{$('regErr').textContent='YOU MUST BE 18 OR OLDER TO JOIN';return}}if(p!==p2){{$('regErr').textContent='PASSWORDS DO NOT MATCH';return}}const d=await api('/api/register',{{username:$('regUser').value.trim(),password:p,theme:regThemeVal}});d.ok?location.reload():$('regErr').textContent='ERROR: '+d.error;}}
 async function doResetRequest(){{const u=$('resetUser').value.trim(),err=$('resetErr'),ok=$('resetOk');err.textContent='';ok.textContent='';if(!u){{err.textContent='USERNAME REQUIRED';return}}const d=await api('/api/reset/request',{{username:u}});d.ok?ok.textContent='REQUEST SENT — AN ADMIN WILL SET A TEMP PASSWORD FOR YOU.':err.textContent='ERROR: '+d.error;}}
