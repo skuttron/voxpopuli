@@ -8,10 +8,8 @@ from cryptography.fernet import Fernet
 
 _BASE = pathlib.Path(__file__).parent.resolve()
 app = Flask(__name__)
-_SK_FILE = str(_BASE / "secret_key.txt")
-if not os.path.exists(_SK_FILE):
-    open(_SK_FILE, "w").write("1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38")
-app.secret_key = open(_SK_FILE).read().strip() or "1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38"
+app.secret_key = os.environ.get("SECRET_KEY","fallback-if-missing")
+
 app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(days=90)
 app.config['SESSION_PERMANENT'] = True
 
