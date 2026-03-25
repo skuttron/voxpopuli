@@ -492,23 +492,7 @@ async function checkNotifications(){{
     if(d.posts>0&&d.posts>_prevNotif.posts&&_prevNotif.posts>=0){{showToast('COMMUNITY POST','New post from a member',()=>{{openModal('postModal');loadPosts();}});pushNotif('COMMUNITY','New community post','posts');}}
     setBadge('badgeDM',d.dm);setBadge('badgeGroup',d.group);setBadge('badgePrivate',d.private);setBadge('badgePosts',d.posts);
     document.title=d.total>0?'('+d.total+') VOX':'VOX';
-    document.getElementById('YOUR_NOTIFY_BUTTON_ID').onclick = async () => {
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: 'YOUR_PUBLIC_VAPID_KEY'
-        });
-        // This sends the data to your Python route @api_push_subscribe
-        await fetch('/api/push/subscribe', {
-            method: 'POST',
-            body: JSON.stringify(sub),
-            headers: {'Content-Type': 'application/json'}
-        });
-        alert("Notifications Active!");
-    }
-};
+    
     _prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,groups:newGroups,private_rooms:newPriv}};
   }}catch(e){{}}
 }}
@@ -603,6 +587,25 @@ if($('dmConvList')){{
   setInterval(()=>{{color=getColor();ctx.fillStyle='rgba(0,0,0,0.05)';ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=color;ctx.font='14px Courier New';for(let i=0;i<drops.length;i++){{ctx.fillText(chars[Math.floor(Math.random()*chars.length)],i*16,drops[i]*16);if(drops[i]*16>c.height&&Math.random()>0.975)drops[i]=0;drops[i]++;}}
   }},50);
 }})();
+document.getElementById('YOUR_NOTIFY_BUTTON_ID').onclick = async () => {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: 'YOUR_PUBLIC_VAPID_KEY'
+        });
+        // This sends the data to your Python route @api_push_subscribe
+        await fetch('/api/push/subscribe', {
+            method: 'POST',
+            body: JSON.stringify(sub),
+            headers: {'Content-Type': 'application/json'}
+        });
+        alert("Notifications Active!");
+    }
+};
+    _prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,groups:newGroups,private_rooms:newPriv}};
+  }}catch(e){{}}
 </script></body></html>"""
 @app.route("/")
 def home():
