@@ -2,9 +2,10 @@
 from flask import Flask, request, session, redirect, jsonify, Response
 import psycopg2
 import psycopg2.extras
-import os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json
+import os, hashlib, datetime, urllib.request, re, html as _html, pathlib, json as _json, time
 from contextlib import contextmanager
 from cryptography.fernet import Fernet
+
 _BASE = pathlib.Path(__file__).parent.resolve()
 app = Flask(__name__)
 _SK_FILE = str(_BASE / "secret_key.txt")
@@ -13,15 +14,37 @@ if not os.path.exists(_SK_FILE):
 app.secret_key = open(_SK_FILE).read().strip() or "1f859b920d32ae2ffab3c0d63987821dcc80b00e79bc0d97540f6340e9c39a38"
 app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(days=90)
 app.config['SESSION_PERMANENT'] = True
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+# ── RAILWAY POSTGRES CONNECTION FIX ──────────────────────────────────────────
+# Railway provides postgres:// but psycopg2 requires postgresql://
+# Also force sslmode=require for Railway's hosted Postgres
+def get_database_url():
+    url = os.environ.get("DATABASE_URL", "")
+    if not url:
+        raise RuntimeError("DATABASE_URL environment variable is not set. "
+                           "Make sure you have added a Postgres service in Railway "
+                           "and linked it to this service.")
+    # Fix scheme: psycopg2 requires postgresql://, Railway gives postgres://
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    # Add sslmode=require if not already present
+    if "sslmode" not in url:
+        separator = "&" if "?" in url else "?"
+        url = url + separator + "sslmode=require"
+    return url
+
+DATABASE_URL = get_database_url()
+
 ADMIN_USER = "Eagleone"
 _KEY_FILE  = str(_BASE / "secret.key")
 if not os.path.exists(_KEY_FILE):
     open(_KEY_FILE, "wb").write(Fernet.generate_key())
 fernet = Fernet(open(_KEY_FILE, "rb").read())
+
 VAPID_PUBLIC_KEY  = os.environ.get("VAPID_PUBLIC_KEY",  "BAyH6Y_hbhzzmRgt3pd5Qa7guYKYKfsVCVIZsJGF0zYPfBupcKm24bduVIj4585JSjeeu3aeR19d4tBzlHgQIdU")
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOqLakrDhZhnH_KBh5nwx2l0jyGfOWplqyE82s4Ryws2hRANCAAQMh-mP4W4c85kYLd6XeUGu4LmCmCn7FQlSGbCRhdM2D3wbqXCptuG3blSI-OfOSUo3nrt2nkdfXeLQc5R4ECHV")
 VAPID_CLAIMS      = {"sub": "mailto:admin@voxpopuli.app"}
+
 hash_pw = lambda pw: hashlib.sha256(pw.encode()).hexdigest()
 enc     = lambda t: fernet.encrypt(t.encode()).decode()
 dec     = lambda t: fernet.decrypt(t.encode()).decode() if t else ""
@@ -30,6 +53,7 @@ logged_in = lambda: "username" in session
 me        = lambda: session.get("username", "")
 ok        = lambda **kw: jsonify({"ok": True, **kw})
 err       = lambda e: jsonify({"ok": False, "error": e})
+
 VALID_EMOJIS = {"like", "dislike", "love", "lol", "wow", "angry", "fire"}
 THEMES = {
     "green":  {"p": "#00ff00", "bg": "#000",    "ac": "#003300", "name": "MATRIX"},
@@ -49,11 +73,25 @@ NAV_ITEMS = [
     ("fa-lightbulb",       "TIPS",     "#"),
     ("fa-hand-holding-heart", "DONATE","#"),
 ]
+
 # ── DB ────────────────────────────────────────────────────────────────────────
 @contextmanager
 def db():
-    con = psycopg2.connect(DATABASE_URL)
-    con.autocommit = False
+    """Open a DB connection with retry logic for Railway cold-starts."""
+    last_exc = None
+    for attempt in range(5):
+        try:
+            con = psycopg2.connect(DATABASE_URL, connect_timeout=10)
+            con.autocommit = False
+            break
+        except psycopg2.OperationalError as exc:
+            last_exc = exc
+            wait = 2 ** attempt          # 1, 2, 4, 8, 16 seconds
+            app.logger.warning(f"DB connect attempt {attempt+1} failed, retrying in {wait}s: {exc}")
+            time.sleep(wait)
+    else:
+        raise last_exc
+
     try:
         yield con
         con.commit()
@@ -63,13 +101,27 @@ def db():
     finally:
         con.close()
 
+
 def execute(con, sql, params=None):
-    """Execute a query and return the cursor."""
     cur = con.cursor()
     cur.execute(sql, params or ())
     return cur
 
+
 def init_db():
+    """Initialise schema — retried up to 5 times so Railway cold-starts don't break deploys."""
+    for attempt in range(5):
+        try:
+            _do_init_db()
+            return
+        except Exception as exc:
+            wait = 3 ** attempt
+            app.logger.warning(f"init_db attempt {attempt+1} failed, retrying in {wait}s: {exc}")
+            time.sleep(wait)
+    raise RuntimeError("Could not initialise database after 5 attempts.")
+
+
+def _do_init_db():
     with db() as con:
         cur = con.cursor()
         cur.execute("""
@@ -223,7 +275,6 @@ def init_db():
         cur.execute("UPDATE users SET is_admin=1 WHERE username=%s", (ADMIN_USER,))
         for ch in ["GENERAL", "SURVIVAL", "BARTER", "HOMESTEAD"]:
             cur.execute("INSERT INTO groups(name,created_by) VALUES(%s,%s) ON CONFLICT (name) DO NOTHING", (ch, "SYSTEM"))
-        users  = [r[0] for r in cur.execute("SELECT username FROM users") or []]
         cur.execute("SELECT username FROM users")
         users = [r[0] for r in cur.fetchall()]
         cur.execute("SELECT id FROM groups")
@@ -235,7 +286,9 @@ def init_db():
                 if (gid, uname) not in banned:
                     cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, uname))
 
+
 init_db()
+
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def is_admin(u=None):
     u = u or me()
@@ -246,10 +299,13 @@ def is_admin(u=None):
         cur.execute("SELECT is_admin FROM users WHERE username=%s", (u,))
         r = cur.fetchone()
     return bool(r and r[0])
+
 def require_login():
     if not logged_in(): return err("NOT LOGGED IN")
+
 def require_admin():
     if not is_admin(): return err("FORBIDDEN")
+
 def send_push(username, title, body, tag="vox"):
     try:
         from pywebpush import webpush
@@ -272,24 +328,30 @@ def send_push(username, title, body, tag="vox"):
                         cur2.execute("DELETE FROM push_subscriptions WHERE endpoint=%s", (endpoint,))
     except Exception:
         pass
+
 def utc_now():
     return datetime.datetime.utcnow().isoformat()
+
 def utc_cutoff(minutes=2):
     return (datetime.datetime.utcnow() - datetime.timedelta(minutes=minutes)).isoformat()
+
 def read_at_map(con, username, chat_type):
     cur = con.cursor()
     cur.execute(
         "SELECT chat_id,read_at FROM chat_read_at WHERE username=%s AND chat_type=%s",
         (username, chat_type))
     return {r[0]: r[1] for r in cur.fetchall()}
+
 def unread_count(con, table, id_col, id_val, username, cutoff):
     cur = con.cursor()
     cur.execute(
         f"SELECT COUNT(*) FROM {table} WHERE {id_col}=%s AND sender!=%s AND timestamp>%s",
         (id_val, username, cutoff))
     return cur.fetchone()[0]
+
 def dec_messages(rows):
     return [{"sender": r[0], "content": dec(r[1]), "timestamp": r[2]} for r in rows]
+
 @app.before_request
 def track_visit():
     if request.path.startswith(("/api", "/static")): return
@@ -301,6 +363,7 @@ def track_visit():
         u = session.get("username")
         if u:
             cur.execute("INSERT INTO user_sessions(username,last_seen) VALUES(%s,%s) ON CONFLICT (username) DO UPDATE SET last_seen=EXCLUDED.last_seen", (u, now))
+
 # ── CSS / HTML HELPERS ────────────────────────────────────────────────────────
 def theme_css(t):
     c = THEMES.get(t, THEMES["green"])
@@ -433,10 +496,13 @@ body::after{{top:0;height:6px;background:var(--p);opacity:.18;filter:blur(1px);a
   .send-btn{{padding:11px 14px;font-size:12px}}.mobile-back-btn{{display:flex!important}}
 }}
 @media(min-width:701px){{.mobile-back-btn{{display:none!important}}.comms-sidebar,.comms-main{{display:flex}}}}"""
+
 def pw_field(fid, ph, ac="current-password"):
     return f'<div class="field-wrap"><input class="field" id="{fid}" placeholder="{ph}" type="password" autocomplete="{ac}"><button class="eye-btn" type="button" onclick="togglePw(\'{fid}\',this)">&#128065;</button></div>'
+
 def theme_btns(fn):
     return "".join(f'<button class="theme-btn" style="color:{c};border-color:{c};" onclick="{fn}(\'{k}\')">&#9679; {k.upper()}</button>' for k,c in [("green","#0f0"),("cyan","#0ff"),("amber","#fb0"),("red","#f22"),("purple","#c4f"),("white","#fff")])
+
 def cyber_box(title, body, *, title_right="", extra_header="", footer="", radius="var(--r)", mb="24px", max_h=None, border_top=True, body_style=""):
     mh = f"max-height:{max_h};overflow-y:auto;" if max_h else ""
     return (f'<div class="command-wrapper" style="width:100%;margin-bottom:{mb};box-sizing:border-box;">'
@@ -445,6 +511,7 @@ def cyber_box(title, body, *, title_right="", extra_header="", footer="", radius
         f'{extra_header}'
         f'<div style="border:2px solid var(--p);border-top:none;border-radius:0 0 {radius} {radius};{mh}{body_style}">{body}</div>'
         f'{footer}</div>')
+
 # ── SHELL ─────────────────────────────────────────────────────────────────────
 def shell(content, user=None, theme="green", unread=0):
     t     = THEMES.get(theme, THEMES["green"])
@@ -500,15 +567,12 @@ function mobileShowChat(type){{if(!isMobile())return;const sMap={{dm:'dmSidebar'
 function mobileShowSidebar(type){{if(!isMobile())return;const sMap={{dm:'dmSidebar',group:'groupSidebar',private:'privateSidebar'}},mMap={{dm:'dmMain',group:'groupMain',private:'privateMain'}},s=$(sMap[type]),m=$(mMap[type]);if(s)s.classList.add('mobile-show');if(m)m.classList.remove('mobile-show');const b=m&&m.querySelector('.mobile-back-btn');if(b)b.style.display='none';}}
 document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('open')}}));
 document.addEventListener('click',e=>{{const menu=$('accountMenu');if(menu&&!e.target.closest('.menu-wrap'))menu.classList.remove('open');if(!e.target.closest('#newDmUser')&&!e.target.closest('#dmUserSuggest'))hideDmSuggest();const item=e.target.closest('[data-action]');if(item){{if(menu)menu.classList.remove('open');const a=item.dataset.action;if(a==='settings')openModal('settingsModal');else if(a==='login')openModal('loginModal');else if(a==='register')openModal('registerModal');}}}});
-// ── AUTH ──────────────────────────────────────────────────────────────────
 async function doLogin(){{const d=await api('/api/login',{{username:$('loginUser').value.trim(),password:$('loginPass').value}});d.ok?location.reload():$('loginErr').textContent='ERROR: '+d.error;}}
 async function doRegister(){{const p=$('regPass').value,p2=$('regPass2').value,dob=$('regDob').value;if(!dob){{$('regErr').textContent='DATE OF BIRTH REQUIRED';return}}if((Date.now()-new Date(dob))/31557600000<18){{$('regErr').textContent='YOU MUST BE 18 OR OLDER TO JOIN';return}}if(p!==p2){{$('regErr').textContent='PASSWORDS DO NOT MATCH';return}}const d=await api('/api/register',{{username:$('regUser').value.trim(),password:p,theme:regThemeVal}});d.ok?location.reload():$('regErr').textContent='ERROR: '+d.error;}}
 async function doResetRequest(){{const u=$('resetUser').value.trim(),err=$('resetErr'),ok=$('resetOk');err.textContent='';ok.textContent='';if(!u){{err.textContent='USERNAME REQUIRED';return}}const d=await api('/api/reset/request',{{username:u}});d.ok?ok.textContent='REQUEST SENT — AN ADMIN WILL SET A TEMP PASSWORD FOR YOU.':err.textContent='ERROR: '+d.error;}}
 async function changePassword(){{const cur=$('pwCurrent').value,nw=$('pwNew').value,nw2=$('pwNew2').value,err=$('pwErr'),ok=$('pwOk');err.textContent='';ok.textContent='';if(!cur||!nw||!nw2){{err.textContent='ALL FIELDS REQUIRED';return}}if(nw!==nw2){{err.textContent='PASSWORDS DO NOT MATCH';return}}if(nw.length<6){{err.textContent='TOO SHORT (MIN 6)';return}}const d=await api('/api/change-password',{{current:cur,new_password:nw}});if(d.ok){{ok.textContent='PASSWORD UPDATED';['pwCurrent','pwNew','pwNew2'].forEach(i=>$(i).value='')}}else err.textContent='ERROR: '+d.error;}}
 async function changeTheme(t){{await api('/api/theme',{{theme:t}});location.reload()}}
-// ── SETTINGS TABS ─────────────────────────────────────────────────────────
 function switchStTab(tab){{['theme','pw','admin'].forEach(k=>{{const K=k[0].toUpperCase()+k.slice(1),c=$('stContent'+K),b=$('stTab'+K);if(c)c.style.display=k===tab?'block':'none';if(b)b.classList.toggle('active',k===tab);}});if(tab==='admin')adminShowUsers();}}
-// ── ADMIN ─────────────────────────────────────────────────────────────────
 const adminBox=()=>$('adminContent');
 const adminErr=msg=>adminBox().innerHTML=`<div style="padding:10px;color:#f44;">${{msg}}</div>`;
 const msgRow=(m,fn)=>`<div style="padding:6px 10px 6px 20px;border-top:1px solid var(--p10);display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
@@ -543,7 +607,6 @@ async function adminShowTraffic(){{$('adminLookupBar').style.display='none';admi
 async function adminShowResets(){{$('adminLookupBar').style.display='none';adminBox().innerHTML='<div style="padding:10px;opacity:.4;text-align:center;">LOADING...</div>';const d=await api('/api/admin/reset-requests');if(!d.ok){{adminErr('ERROR');return}}if(!d.requests.length){{adminBox().innerHTML='<div style="padding:12px;opacity:.4;text-align:center;">NO PENDING RESET REQUESTS</div>';return}}let html='<div style="padding:6px 10px;opacity:.5;font-size:10px;border-bottom:1px solid var(--p10);">&#128274; PASSWORD RESET REQUESTS</div>';d.requests.forEach(r=>{{html+=`<div style="padding:10px;border-bottom:1px solid var(--p10);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;"><div><span style="font-size:12px;">${{r.username}}</span><span style="font-size:10px;opacity:.5;margin-left:8px;">${{r.requested_at}}</span>${{r.temp_password?`<div style="font-size:11px;margin-top:4px;color:#4f4;">TEMP PW: <b>${{r.temp_password}}</b></div>`:''}}</div><div style="display:flex;gap:4px;flex-wrap:wrap;"><input id="tmpPw_${{r.id}}" class="field-plain" placeholder="SET TEMP PW..." style="margin:0;padding:5px 8px;font-size:11px;width:120px;border-radius:6px;"><button class="btn-action" style="margin:0;padding:4px 10px;font-size:10px;" onclick="adminApproveReset(${{r.id}})">&#10003; SET</button><button class="btn-action" style="margin:0;padding:4px 10px;font-size:10px;border-color:#f44;color:#f44;" onclick="adminDenyReset(${{r.id}})">&#10006;</button></div></div>`;}});adminBox().innerHTML=html;}}
 async function adminApproveReset(id){{const inp=document.getElementById('tmpPw_'+id),pw=inp?inp.value.trim():'';if(!pw){{alert('ENTER A TEMPORARY PASSWORD');return}}const d=await api('/api/admin/reset-approve',{{id,temp_password:pw}});d.ok?adminShowResets():alert('ERROR: '+d.error);}}
 async function adminDenyReset(id){{if(!confirm('DENY THIS RESET REQUEST?'))return;const d=await api('/api/admin/reset-deny',{{id}});d.ok?adminShowResets():alert('ERROR: '+d.error);}}
-// ── NEWS ──────────────────────────────────────────────────────────────────
 let activeNewsTab='world';
 function switchNewsTab(tab){{activeNewsTab=tab;[['newsTabWorld','world'],['newsTabUS','usnews'],['newsTabEpstein','epstein']].forEach(([id,t])=>{{const el=$(id);if(!el)return;el.style.background=tab===t?'var(--p)':'var(--p10)';el.style.color=tab===t?'#000':'var(--p)';}});loadNewsFeed();}}
 async function loadNewsFeed(){{
@@ -578,7 +641,6 @@ async function loadNewsFeed(){{
     const feed=$('newsFeed');if(feed)feed.innerHTML='<div style="padding:12px;color:#f44;font-size:11px;">FEED ERROR</div>';
   }}
 }}
-// ── POSTS ─────────────────────────────────────────────────────────────────
 function updatePostCount(el){{const c=$('postCount');if(c)c.textContent=el.value.length+'/500';}}
 function markPostsRead(){{
   api('/api/mark-read',{{type:'posts',id:'posts'}});
@@ -623,7 +685,6 @@ async function submitPost(){{
 }}
 async function reactPost(postId,emoji){{await api('/api/posts/react',{{post_id:postId,emoji}});loadPosts();}}
 async function deletePost(postId){{if(!confirm('DELETE THIS POST?'))return;await api('/api/posts/delete',{{post_id:postId}});loadPosts();}}
-// ── NOTIFICATIONS ─────────────────────────────────────────────────────────
 function enableNotifications(){{
   if(!('Notification' in window)){{alert('NOTIFICATIONS NOT SUPPORTED ON THIS BROWSER');return}}
   if(Notification.permission==='granted'){{setupPushSubscription();const m=$('notifMenuItem');if(m)m.style.display='none';return}}
@@ -717,20 +778,17 @@ async function checkNotifications(){{
     _prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,groups:newGroups,private_rooms:newPriv}};
   }}catch(e){{}}
 }}
-// ── TRAFFIC ───────────────────────────────────────────────────────────────
 async function loadTrafficCounter(){{
   try{{const d=await api('/api/traffic/public');if(d.ok){{$('tcOnline').textContent=d.online;$('tcToday').textContent=d.today;$('tcTotal').textContent=d.total;if($('tcMembers'))$('tcMembers').textContent=d.members;}}}}catch(e){{}}
 }}
 async function loadOnlineUsers(){{
   try{{const d=await api('/api/online');if(d.ok){{onlineUsers=new Set(d.online);if($('dmConvList'))loadDMConversations();}}}}catch(e){{}}
 }}
-// ── SEARCH ────────────────────────────────────────────────────────────────
 function homeRunSearch(){{
   const q=$('homeSearchInput');if(!q)return;
   const query=q.value.trim();if(!query)return;
   window.open('https://www.google.com/search?q='+encodeURIComponent(query),'_blank','noopener,noreferrer');
 }}
-// ── MESSAGING ─────────────────────────────────────────────────────────────
 function renderBubbles(messages,me,container){{
   if(!messages||!messages.length){{container.innerHTML='<div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">NO MESSAGES YET</div>';return}}
   const atBottom=container.scrollHeight-container.scrollTop-container.clientHeight<60;
@@ -740,7 +798,6 @@ function renderBubbles(messages,me,container){{
     <div class="bubble-meta">${{mine?'YOU':m.sender}} &middot; ${{m.timestamp}}</div></div></div>`}}).join('');
   if(atBottom||container.scrollTop===0)container.scrollTop=container.scrollHeight;
 }}
-// ── DM ────────────────────────────────────────────────────────────────────
 async function dmUserSearch(){{
   const q=$('newDmUser').value.trim(),box=$('dmUserSuggest');
   if(!q){{box.style.display='none';return}}
@@ -788,7 +845,6 @@ async function sendDM(){{
   if(!d.ok){{alert('ERROR: '+d.error);return}}
   loadDMThread(activeDMUser,true);
 }}
-// ── GROUPS ────────────────────────────────────────────────────────────────
 async function loadGroups(){{
   const d=await api('/api/groups'),box=$('groupList');
   if(!d.ok||!d.groups.length){{box.innerHTML=`<div style="padding:10px;font-size:11px;opacity:.4;">${{d.ok?'NO CHANNELS':'LOGIN TO VIEW'}}</div>`;return}}
@@ -838,7 +894,6 @@ async function sendGroupMsg(){{
   $('groupInput').value='';await api('/api/groups/send',{{group_id:activeGroupId,content}});
   loadGroupThread(activeGroupId,activeGroupName,false);
 }}
-// ── PRIVATE ROOMS ─────────────────────────────────────────────────────────
 async function loadPrivateRooms(){{
   const box=$('privateRoomList');if(!box)return;
   const d=await api('/api/private/rooms');
@@ -925,14 +980,12 @@ async function renameChat(type,id){{
   if(type==='group'){{activeGroupName=newName.trim().toUpperCase();loadGroupThread(id,activeGroupName,true);}}
   else{{activePrivateRoomName=newName.trim().toUpperCase();loadPrivateThread(id,activePrivateRoomName,true);}}
 }}
-// ── TABS ──────────────────────────────────────────────────────────────────
 function switchTab(tab){{
   ['DM','Group','Private'].forEach(t=>{{$('tab'+t).classList.toggle('active',t.toLowerCase()===tab);$('tabContent'+t).classList.toggle('active',t.toLowerCase()===tab)}});
   if(tab==='dm'){{loadDMConversations();setBadge('badgeDM',0);api('/api/mark-read',{{type:'dm',id:activeDMUser||''}});_prevNotif.dm=0;}}
   else if(tab==='group')loadGroups();
   else if(tab==='private')loadPrivateRooms();
 }}
-// ── INIT ──────────────────────────────────────────────────────────────────
 loadTrafficCounter();setInterval(loadTrafficCounter,10000);
 requestNotifPermission();checkNotifications();setInterval(checkNotifications,8000);
 loadOnlineUsers();setInterval(loadOnlineUsers,10000);
@@ -947,7 +1000,6 @@ if($('dmConvList')){{
     if(activePrivateRoomId)loadPrivateThread(activePrivateRoomId,activePrivateRoomName,false);
   }},5000);
 }}
-// ── MATRIX RAIN ───────────────────────────────────────────────────────────
 (function(){{
   const c=document.createElement('canvas');
   c.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:0.18;';
@@ -970,6 +1022,7 @@ if($('dmConvList')){{
   }},50);
 }})();
 </script></body></html>"""
+
 # ── ROUTES ────────────────────────────────────────────────────────────────────
 @app.route("/")
 def home():
@@ -998,6 +1051,7 @@ def home():
     news_panel = cyber_box("// LIVE NEWS //", _news_body, title_right=_news_title_right, extra_header=_news_tabs, max_h="320px", border_top=False) if user else ""
     content = (f'<div class="command-wrapper"><div style="text-align:center;width:100%;"><div class="tile-grid">{tiles}</div></div>{install_banner}{search_bar}{chat_panel}{news_panel}<div class="content-box">The system is broken! We rely on big corporations to supply us — that\'s why they can inflate prices!<br><br>We build the future we want to live in by growing our own food and bartering. Buy local, sell local!</div><div class="content-box">If you have landed here, you are wondering if there is a different way to live. We will show you exactly how, step by step.</div><div class="three-column-grid"><div class="column"><h3>THE TRUTH</h3><p>Wealth gap and corporate reliance truth.</p><a class="btn-action" href="https://www.youtube.com/watch?v=pb0OCI9qwIU" target="_blank" rel="noopener noreferrer">&#9658; WATCH</a></div><div class="column"><h3>ORGANIZE</h3><p>Grow food, barter, and rebuild community.</p><a class="btn-action" href="https://www.youtube.com/watch?v=shIfzNOcNvs" target="_blank" rel="noopener noreferrer">&#9658; LEARN</a></div><div class="column"><h3>COMMUNITY</h3><p>Join our TikTok community and say hello!</p><a class="btn-action" href="#" target="_blank" rel="noopener noreferrer">&#9658; ACCESS</a></div></div><iframe class="top-video" src="https://www.youtube.com/embed/Ee_uujKuJMI?loop=1&playlist=Ee_uujKuJMI" frameborder="0" allow="encrypted-media" allowfullscreen></iframe></div>')
     return shell(content, user=user, theme=theme)
+
 # ── AUTH ──────────────────────────────────────────────────────────────────────
 @app.route("/api/register", methods=["POST"])
 def api_register():
@@ -1021,6 +1075,7 @@ def api_register():
         return err("USERNAME TAKEN")
     except Exception as e:
         return err(str(e))
+
 @app.route("/api/login", methods=["POST"])
 def api_login():
     d = request.json
@@ -1037,9 +1092,11 @@ def api_login():
                 cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, u))
     session["username"] = u; session["theme"] = row[1]; session.permanent = True
     return ok()
+
 @app.route("/logout")
 def logout():
     session.clear(); return redirect("/")
+
 @app.route("/api/theme", methods=["POST"])
 def api_theme():
     if e := require_login(): return e
@@ -1049,6 +1106,7 @@ def api_theme():
         cur = con.cursor()
         cur.execute("UPDATE users SET theme=%s WHERE username=%s", (t, me()))
     session["theme"] = t; return ok()
+
 @app.route("/api/change-password", methods=["POST"])
 def api_change_password():
     if e := require_login(): return e
@@ -1063,6 +1121,7 @@ def api_change_password():
         if not row or row[0] != hash_pw(cur_pw): return err("CURRENT PASSWORD INCORRECT")
         cur.execute("UPDATE users SET password_hash=%s WHERE username=%s", (hash_pw(new_pw), me()))
     return ok()
+
 @app.route("/api/users/search")
 def api_user_search():
     q = request.args.get("q","").strip()
@@ -1072,6 +1131,7 @@ def api_user_search():
         cur.execute("SELECT username FROM users WHERE username LIKE %s LIMIT 10", (f"%{q}%",))
         rows = cur.fetchall()
     return ok(users=[r[0] for r in rows])
+
 # ── POSTS ─────────────────────────────────────────────────────────────────────
 @app.route("/api/posts")
 def api_posts():
@@ -1091,6 +1151,7 @@ def api_posts():
     posts = [{"id": r[0], "username": r[1], "content": r[2], "created_at": str(r[3])[:16],
               "reactions": rx.get(r[0], {}), "can_delete": is_admin(u) or r[1] == u} for r in rows]
     return ok(posts=posts, me=u)
+
 @app.route("/api/posts/create", methods=["POST"])
 def api_posts_create():
     if e := require_login(): return e
@@ -1101,6 +1162,7 @@ def api_posts_create():
         cur = con.cursor()
         cur.execute("INSERT INTO posts(username,content) VALUES(%s,%s)", (me(), content))
     return ok()
+
 @app.route("/api/posts/react", methods=["POST"])
 def api_posts_react():
     if e := require_login(): return e
@@ -1118,6 +1180,7 @@ def api_posts_react():
         else:
             cur.execute("INSERT INTO post_reactions(post_id,username,emoji) VALUES(%s,%s,%s)", (post_id, u, emoji))
     return ok()
+
 @app.route("/api/posts/delete", methods=["POST"])
 def api_posts_delete():
     if e := require_login(): return e
@@ -1132,6 +1195,7 @@ def api_posts_delete():
         cur.execute("DELETE FROM post_reactions WHERE post_id=%s", (post_id,))
         cur.execute("DELETE FROM posts WHERE id=%s", (post_id,))
     return ok()
+
 # ── ADMIN ─────────────────────────────────────────────────────────────────────
 @app.route("/api/admin/users")
 def api_admin_users():
@@ -1141,6 +1205,7 @@ def api_admin_users():
         cur.execute("SELECT username,is_admin,created_at FROM users ORDER BY is_admin DESC,created_at ASC")
         rows = cur.fetchall()
     return ok(users=[{"username": r[0], "is_admin": bool(r[1]), "created_at": str(r[2])} for r in rows])
+
 @app.route("/api/admin/set-admin", methods=["POST"])
 def api_admin_set():
     if e := require_admin(): return e
@@ -1151,6 +1216,7 @@ def api_admin_set():
         cur = con.cursor()
         cur.execute("UPDATE users SET is_admin=%s WHERE username=%s", (1 if grant else 0, target))
     return ok()
+
 @app.route("/api/admin/remove-user", methods=["POST"])
 def api_admin_remove_user():
     if e := require_admin(): return e
@@ -1163,6 +1229,7 @@ def api_admin_remove_user():
         cur.execute("DELETE FROM group_members WHERE username=%s", (target,))
         cur.execute("DELETE FROM users WHERE username=%s", (target,))
     return ok()
+
 @app.route("/api/admin/dm-log")
 def api_admin_dm_log():
     if e := require_admin(): return e
@@ -1171,6 +1238,7 @@ def api_admin_dm_log():
         cur.execute("SELECT id,sender,recipient,content_enc,timestamp FROM messages ORDER BY timestamp DESC LIMIT 200")
         rows = cur.fetchall()
     return ok(messages=[{"id": r[0], "sender": r[1], "recipient": r[2], "content": dec(r[3]), "timestamp": str(r[4])} for r in rows])
+
 @app.route("/api/admin/delete-dm", methods=["POST"])
 def api_admin_delete_dm():
     if e := require_admin(): return e
@@ -1178,6 +1246,7 @@ def api_admin_delete_dm():
         cur = con.cursor()
         cur.execute("DELETE FROM messages WHERE id=%s", (request.json.get("id"),))
     return ok()
+
 @app.route("/api/admin/group-log")
 def api_admin_group_log():
     if e := require_admin(): return e
@@ -1189,6 +1258,7 @@ def api_admin_group_log():
             "ORDER BY gm.timestamp DESC LIMIT 200")
         rows = cur.fetchall()
     return ok(messages=[{"id": r[0], "group_id": r[1], "group": r[2], "sender": r[3], "content": dec(r[4]), "timestamp": str(r[5])} for r in rows])
+
 @app.route("/api/admin/user-chat")
 def api_admin_user_chat():
     if e := require_admin(): return e
@@ -1208,6 +1278,7 @@ def api_admin_user_chat():
         convos.setdefault(p, []).append({"id": r[0], "sender": r[1], "recipient": r[2], "content": dec(r[3]), "timestamp": str(r[4])})
     result = [{"partner": p, "messages": m} for p, m in convos.items()]
     return ok(username=username, conversations=result, total=sum(len(c["messages"]) for c in result))
+
 @app.route("/api/admin/delete-convo", methods=["POST"])
 def api_admin_delete_convo():
     if e := require_admin(): return e
@@ -1217,6 +1288,7 @@ def api_admin_delete_convo():
         cur = con.cursor()
         cur.execute("DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)", (u1, u2, u2, u1))
     return ok()
+
 @app.route("/api/admin/delete-channel", methods=["POST"])
 def api_admin_delete_channel():
     if e := require_admin(): return e
@@ -1228,6 +1300,7 @@ def api_admin_delete_channel():
         cur.execute("DELETE FROM group_members WHERE group_id=%s", (gid,))
         cur.execute("DELETE FROM groups WHERE id=%s", (gid,))
     return ok()
+
 @app.route("/api/admin/delete-group-msg", methods=["POST"])
 def api_admin_delete_group_msg():
     if e := require_admin(): return e
@@ -1235,6 +1308,7 @@ def api_admin_delete_group_msg():
         cur = con.cursor()
         cur.execute("DELETE FROM group_messages WHERE id=%s", (request.json.get("id"),))
     return ok()
+
 @app.route("/api/admin/lock-channel", methods=["POST"])
 def api_admin_lock_channel():
     if e := require_admin(): return e
@@ -1243,6 +1317,7 @@ def api_admin_lock_channel():
         cur = con.cursor()
         cur.execute("UPDATE groups SET locked=%s WHERE id=%s", (1 if d.get("lock") else 0, d.get("group_id")))
     return ok()
+
 @app.route("/api/admin/traffic")
 def api_admin_traffic():
     if e := require_admin(): return e
@@ -1255,6 +1330,7 @@ def api_admin_traffic():
         cur.execute("SELECT COUNT(*) FROM visits WHERE date=CURRENT_DATE::text")
         today = cur.fetchone()[0]
     return ok(days=[{"date": r[0], "visitors": r[1]} for r in rows], total=total, today=today)
+
 @app.route("/api/admin/reset-requests")
 def api_admin_reset_requests():
     if e := require_admin(): return e
@@ -1265,6 +1341,7 @@ def api_admin_reset_requests():
             "WHERE status='pending' ORDER BY requested_at DESC")
         rows = cur.fetchall()
     return ok(requests=[{"id": r[0], "username": r[1], "temp_password": r[2], "status": r[3], "requested_at": str(r[4])} for r in rows])
+
 @app.route("/api/admin/reset-approve", methods=["POST"])
 def api_admin_reset_approve():
     if e := require_admin(): return e
@@ -1280,6 +1357,7 @@ def api_admin_reset_approve():
         cur.execute("UPDATE users SET password_hash=%s WHERE username=%s", (hash_pw(temp_pw), row[0]))
         cur.execute("UPDATE password_resets SET status='approved',temp_password=%s WHERE id=%s", (temp_pw, rid))
     return ok()
+
 @app.route("/api/admin/reset-deny", methods=["POST"])
 def api_admin_reset_deny():
     if e := require_admin(): return e
@@ -1289,6 +1367,7 @@ def api_admin_reset_deny():
         cur = con.cursor()
         cur.execute("UPDATE password_resets SET status='denied' WHERE id=%s", (rid,))
     return ok()
+
 # ── TRAFFIC ───────────────────────────────────────────────────────────────────
 @app.route("/api/traffic/public")
 def api_traffic_public():
@@ -1313,6 +1392,7 @@ def api_traffic_public():
         cur.execute("SELECT COUNT(*) FROM users")
         members = cur.fetchone()[0]
     return ok(today=today, total=total, online=online, members=members)
+
 @app.route("/api/online")
 def api_online():
     if not logged_in(): return ok(online=[])
@@ -1322,6 +1402,7 @@ def api_online():
         cur.execute("SELECT username FROM user_sessions WHERE last_seen >= %s", (cutoff,))
         rows = cur.fetchall()
     return ok(online=[r[0] for r in rows])
+
 # ── NEWS ──────────────────────────────────────────────────────────────────────
 @app.route("/api/news")
 def api_news():
@@ -1388,6 +1469,7 @@ def api_news():
         except: continue
     random.shuffle(items)
     return ok(items=items[:40])
+
 # ── MESSAGING ─────────────────────────────────────────────────────────────────
 @app.route("/api/dm/conversations")
 def api_dm_conversations():
@@ -1407,6 +1489,7 @@ def api_dm_conversations():
             cnt = cur.fetchone()[0]
             convos.append({"username": partner, "unread": cnt})
     return ok(conversations=convos)
+
 @app.route("/api/dm/thread")
 def api_dm_thread():
     if not logged_in(): return jsonify({"ok": False})
@@ -1421,6 +1504,7 @@ def api_dm_thread():
         rows = cur.fetchall()
         cur.execute("UPDATE messages SET read=1 WHERE recipient=%s AND sender=%s", (u, other))
     return ok(me=u, messages=dec_messages(rows))
+
 @app.route("/api/dm/send", methods=["POST"])
 def api_dm_send():
     if e := require_login(): return e
@@ -1437,6 +1521,7 @@ def api_dm_send():
         cur.execute("INSERT INTO messages(sender,recipient,content_enc) VALUES(%s,%s,%s)", (u, to, enc(content)))
     send_push(to, f"DM from {u}", content[:80], tag="dm")
     return ok()
+
 @app.route("/api/dm/delete", methods=["POST"])
 def api_dm_delete():
     if e := require_login(): return e
@@ -1447,6 +1532,7 @@ def api_dm_delete():
         cur = con.cursor()
         cur.execute("DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)", (u,other,other,u))
     return ok()
+
 @app.route("/api/dm/block", methods=["POST"])
 def api_dm_block():
     if e := require_login(): return e
@@ -1458,6 +1544,7 @@ def api_dm_block():
         cur.execute("INSERT INTO dm_blocked(blocker,blocked) VALUES(%s,%s) ON CONFLICT DO NOTHING", (u, other))
         cur.execute("DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)", (u,other,other,u))
     return ok()
+
 @app.route("/api/dm/unblock", methods=["POST"])
 def api_dm_unblock():
     if e := require_login(): return e
@@ -1466,6 +1553,7 @@ def api_dm_unblock():
         cur = con.cursor()
         cur.execute("DELETE FROM dm_blocked WHERE blocker=%s AND blocked=%s", (me(), other))
     return ok()
+
 # ── GROUPS ────────────────────────────────────────────────────────────────────
 @app.route("/api/groups")
 def api_groups():
@@ -1483,6 +1571,7 @@ def api_groups():
         unread  = {r[0]: unread_count(con, 'group_messages', 'group_id', r[0], u, rat.get(str(r[0]), '1970-01-01')) for r in rows}
     return ok(groups=[{"id": r[0], "name": r[1], "member": r[0] in members, "locked": bool(r[2]),
                        "banned": r[0] in banned, "unread": unread.get(r[0], 0)} for r in rows])
+
 @app.route("/api/groups/create", methods=["POST"])
 def api_group_create():
     if e := require_login(): return e
@@ -1499,6 +1588,7 @@ def api_group_create():
         return ok(id=gid)
     except psycopg2.errors.UniqueViolation:
         return err("CHANNEL NAME TAKEN")
+
 @app.route("/api/groups/<int:gid>/messages")
 def api_group_messages(gid):
     if not logged_in(): return jsonify({"ok": False})
@@ -1523,6 +1613,7 @@ def api_group_messages(gid):
     is_member = admin or (bool(member) and not bool(banned))
     return ok(me=u, member=is_member, locked=bool(group and group[0]), admin=admin, members=members_list,
               messages=dec_messages(rows))
+
 @app.route("/api/groups/send", methods=["POST"])
 def api_group_send():
     if e := require_login(): return e
@@ -1548,6 +1639,7 @@ def api_group_send():
     gname = gname[0] if gname else "GROUP"
     for member in members: send_push(member, f"#{gname}", f"{u}: {content[:60]}", tag=f"group-{gid}")
     return ok()
+
 @app.route("/api/groups/kick", methods=["POST"])
 def api_group_kick():
     if e := require_admin(): return e
@@ -1557,6 +1649,7 @@ def api_group_kick():
         cur = con.cursor()
         cur.execute("DELETE FROM group_members WHERE group_id=%s AND username=%s", (gid, target))
     return ok()
+
 @app.route("/api/groups/ban", methods=["POST"])
 def api_group_ban():
     if e := require_admin(): return e
@@ -1567,6 +1660,7 @@ def api_group_ban():
         cur.execute("DELETE FROM group_members WHERE group_id=%s AND username=%s", (gid, target))
         cur.execute("INSERT INTO group_banned(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, target))
     return ok()
+
 @app.route("/api/groups/unban", methods=["POST"])
 def api_group_unban():
     if e := require_admin(): return e
@@ -1576,6 +1670,7 @@ def api_group_unban():
         cur.execute("DELETE FROM group_banned WHERE group_id=%s AND username=%s", (gid, target))
         cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (gid, target))
     return ok()
+
 @app.route("/api/groups/join", methods=["POST"])
 def api_group_join():
     if not logged_in(): return jsonify({"ok": False})
@@ -1584,6 +1679,7 @@ def api_group_join():
         cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",
                     (request.json.get("group_id"), me()))
     return ok()
+
 @app.route("/api/groups/leave", methods=["POST"])
 def api_group_leave():
     if not logged_in(): return jsonify({"ok": False})
@@ -1591,6 +1687,7 @@ def api_group_leave():
         cur = con.cursor()
         cur.execute("DELETE FROM group_members WHERE group_id=%s AND username=%s", (request.json.get("group_id"), me()))
     return ok()
+
 @app.route("/api/group/rename", methods=["POST"])
 def api_group_rename():
     if e := require_admin(): return e
@@ -1602,6 +1699,7 @@ def api_group_rename():
             cur.execute("UPDATE groups SET name=%s WHERE id=%s", (name, gid))
         return ok()
     except: return err("NAME TAKEN")
+
 # ── PRIVATE ROOMS ─────────────────────────────────────────────────────────────
 @app.route("/api/private/rooms")
 def api_private_rooms():
@@ -1617,6 +1715,7 @@ def api_private_rooms():
         rat    = read_at_map(con, u, 'private')
         unread = {r[0]: unread_count(con, 'private_room_messages', 'room_id', r[0], u, rat.get(str(r[0]), '1970-01-01')) for r in rows}
     return ok(rooms=[{"id": r[0], "name": r[1], "unread": unread.get(r[0], 0)} for r in rows], is_admin=admin)
+
 @app.route("/api/private/create", methods=["POST"])
 def api_private_create():
     if e := require_admin(): return e
@@ -1628,6 +1727,7 @@ def api_private_create():
         rid = cur.fetchone()[0]
         cur.execute("INSERT INTO private_room_members(room_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (rid, me()))
     return ok(id=rid)
+
 @app.route("/api/private/<int:rid>/messages")
 def api_private_messages(rid):
     if e := require_login(): return e
@@ -1640,6 +1740,7 @@ def api_private_messages(rid):
         cur.execute("SELECT sender,content_enc,timestamp FROM private_room_messages WHERE room_id=%s ORDER BY timestamp ASC LIMIT 100", (rid,))
         rows = cur.fetchall()
     return ok(me=u, is_admin=admin, messages=dec_messages(rows))
+
 @app.route("/api/private/send", methods=["POST"])
 def api_private_send():
     if e := require_login(): return e
@@ -1661,6 +1762,7 @@ def api_private_send():
     rname = rname[0] if rname else "PRIVATE"
     for member in members: send_push(member, f"🔒 {rname}", f"{u}: {content[:60]}", tag=f"private-{rid}")
     return ok()
+
 @app.route("/api/private/<int:rid>/members")
 def api_private_members(rid):
     if e := require_admin(): return e
@@ -1669,6 +1771,7 @@ def api_private_members(rid):
         cur.execute("SELECT username FROM private_room_members WHERE room_id=%s ORDER BY username", (rid,))
         rows = cur.fetchall()
     return ok(members=[r[0] for r in rows])
+
 @app.route("/api/private/add-member", methods=["POST"])
 def api_private_add_member():
     if e := require_admin(): return e
@@ -1680,6 +1783,7 @@ def api_private_add_member():
         if not cur.fetchone(): return err("USER NOT FOUND")
         cur.execute("INSERT INTO private_room_members(room_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING", (rid, username))
     return ok()
+
 @app.route("/api/private/remove-member", methods=["POST"])
 def api_private_remove_member():
     if e := require_admin(): return e
@@ -1689,6 +1793,7 @@ def api_private_remove_member():
         cur = con.cursor()
         cur.execute("DELETE FROM private_room_members WHERE room_id=%s AND username=%s", (rid, username))
     return ok()
+
 @app.route("/api/private/rename", methods=["POST"])
 def api_private_rename():
     if e := require_admin(): return e
@@ -1698,6 +1803,7 @@ def api_private_rename():
         cur = con.cursor()
         cur.execute("UPDATE private_rooms SET name=%s WHERE id=%s", (name, rid))
     return ok()
+
 # ── NOTIFICATIONS ─────────────────────────────────────────────────────────────
 @app.route("/api/notifications")
 def api_notifications():
@@ -1705,7 +1811,6 @@ def api_notifications():
     u = me()
     with db() as con:
         cur = con.cursor()
-        # DMs
         read_dm_at = read_at_map(con, u, 'dm')
         cur.execute("SELECT DISTINCT sender FROM messages WHERE recipient=%s", (u,))
         senders = [r[0] for r in cur.fetchall()]
@@ -1714,7 +1819,6 @@ def api_notifications():
             cur.execute("SELECT COUNT(*) FROM messages WHERE sender=%s AND recipient=%s AND timestamp>%s",
                         (sender, u, read_dm_at.get(sender, '1970-01-01')))
             dm_unread += cur.fetchone()[0]
-        # Groups
         cur.execute("SELECT id,name FROM groups WHERE id IN (SELECT group_id FROM group_members WHERE username=%s) ORDER BY id", (u,))
         group_rows = cur.fetchall()
         read_grp_at = read_at_map(con, u, 'group')
@@ -1722,7 +1826,6 @@ def api_notifications():
         for gid, gname in group_rows:
             cnt = unread_count(con, 'group_messages', 'group_id', gid, u, read_grp_at.get(str(gid), '1970-01-01'))
             if cnt: groups_unread[str(gid)] = {"name": gname, "count": cnt}
-        # Private rooms
         if is_admin(u):
             cur.execute("SELECT id,name FROM private_rooms ORDER BY id")
         else:
@@ -1733,7 +1836,6 @@ def api_notifications():
         for rid, rname in priv_rows:
             cnt = unread_count(con, 'private_room_messages', 'room_id', rid, u, read_prv_at.get(str(rid), '1970-01-01'))
             if cnt: privrooms_unread[str(rid)] = {"name": rname, "count": cnt}
-        # Posts
         cur.execute("SELECT read_at FROM chat_read_at WHERE username=%s AND chat_type='posts' AND chat_id='posts'", (u,))
         posts_read = cur.fetchone()
         cur.execute("SELECT COUNT(*) FROM posts WHERE username!=%s AND created_at>%s",
@@ -1744,6 +1846,7 @@ def api_notifications():
     return ok(dm=dm_unread, groups=groups_unread, group=group_total,
               private_rooms=privrooms_unread, private=priv_total, posts=new_posts,
               total=dm_unread + group_total + priv_total + new_posts)
+
 @app.route("/api/mark-read", methods=["POST"])
 def api_mark_read():
     if e := require_login(): return e
@@ -1759,6 +1862,7 @@ def api_mark_read():
         if chat_type == "dm":
             cur.execute("UPDATE messages SET read=1 WHERE recipient=%s AND sender=%s", (me(), chat_id))
     return ok()
+
 # ── PASSWORD RESET ────────────────────────────────────────────────────────────
 @app.route("/api/reset/request", methods=["POST"])
 def api_reset_request():
@@ -1772,10 +1876,12 @@ def api_reset_request():
         if cur.fetchone(): return ok()
         cur.execute("INSERT INTO password_resets(username) VALUES(%s)", (username,))
     return ok()
+
 # ── PUSH ──────────────────────────────────────────────────────────────────────
 @app.route("/api/push/vapid-public-key")
 def api_vapid_public_key():
     return ok(key=VAPID_PUBLIC_KEY)
+
 @app.route("/api/push/subscribe", methods=["POST"])
 def api_push_subscribe():
     if e := require_login(): return e
@@ -1788,6 +1894,7 @@ def api_push_subscribe():
                     "ON CONFLICT (username,endpoint) DO UPDATE SET p256dh=EXCLUDED.p256dh, auth=EXCLUDED.auth",
                     (me(), endpoint, p256dh, auth))
     return ok()
+
 @app.route("/api/push/unsubscribe", methods=["POST"])
 def api_push_unsubscribe():
     if e := require_login(): return e
@@ -1797,6 +1904,7 @@ def api_push_unsubscribe():
             cur = con.cursor()
             cur.execute("DELETE FROM push_subscriptions WHERE username=%s AND endpoint=%s", (me(), endpoint))
     return ok()
+
 # ── MISC ROUTES ───────────────────────────────────────────────────────────────
 @app.route("/api/ask", methods=["POST"])
 def api_ask():
@@ -1816,6 +1924,7 @@ def api_ask():
         return ok(answer=data["candidates"][0]["content"]["parts"][0]["text"].strip())
     except:
         return ok(answer="")
+
 @app.route("/manifest.json")
 def manifest():
     data = {"name": "Vox Populi", "short_name": "VOX", "description": "Vox Populi Community",
@@ -1826,6 +1935,7 @@ def manifest():
             "categories": ["social", "news"],
             "shortcuts": [{"name": "Chat", "url": "/", "description": "Open Vox community chat"}]}
     return Response(_json.dumps(data), mimetype="application/json")
+
 @app.route("/sw.js")
 def service_worker():
     sw = """const CACHE='vox-v1';
@@ -1835,6 +1945,7 @@ self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;if(e.reques
 self.addEventListener('push',e=>{let data={title:'VOX',body:'New notification',tag:'vox'};try{data=e.data.json();}catch(err){}e.waitUntil(self.registration.showNotification('VOX // '+data.title,{body:data.body,icon:'/icon-192.png',badge:'/icon-192.png',tag:data.tag,renotify:true,vibrate:[200,100,200],data:{url:'/'}}));});
 self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(self.location.origin)){c.focus();return;}}clients.openWindow('/');}));});"""
     return Response(sw, mimetype="application/javascript")
+
 def _svg_icon(size, text_y, font_size, sub_y=None, sub_text=None):
     txt = f'<text x="{size//2}" y="{text_y}" text-anchor="middle" font-family="monospace" font-weight="900" font-size="{font_size}" fill="#00ff00" letter-spacing="2">VOX</text>'
     sub = f'<text x="{size//2}" y="{sub_y}" text-anchor="middle" font-family="monospace" font-size="{font_size//4}" fill="#00ff00" opacity="0.6" letter-spacing="6">{sub_text}</text>' if sub_text else ''
@@ -1845,10 +1956,13 @@ def _svg_icon(size, text_y, font_size, sub_y=None, sub_text=None):
         return Response(cairosvg.svg2png(bytestring=svg, output_width=size, output_height=size), mimetype="image/png")
     except:
         return Response(svg, mimetype="image/svg+xml")
+
 @app.route("/icon-192.png")
 def icon_192(): return _svg_icon(192, 108, 34)
+
 @app.route("/icon-512.png")
 def icon_512(): return _svg_icon(512, 285, 90, sub_y=325, sub_text="VOX POPULI")
+
 @app.route("/reset-x7k9m2p4q8w3n6j1vb5")
 def emergency_reset():
     new_pw = "Vox2024!"
@@ -1856,10 +1970,12 @@ def emergency_reset():
         cur = con.cursor()
         cur.execute("UPDATE users SET password_hash=%s WHERE username=%s", (hash_pw(new_pw), ADMIN_USER))
     return "<h1 style='font-family:monospace;background:#000;color:#0f0;padding:40px;'>DONE! Login: Eagleone / Vox2024! — CHANGE YOUR PASSWORD AFTER LOGGING IN.</h1>"
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     import traceback
     app.logger.error(traceback.format_exc())
     return f"<pre style='background:#111;color:#f44;padding:20px;font-size:12px;'>ERROR:\n{traceback.format_exc()}</pre>", 500
+
 if __name__ == "__main__":
     app.run(debug=False)
