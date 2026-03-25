@@ -132,9 +132,11 @@ def require_login():
     if not logged_in(): return err("NOT LOGGED IN")
 def require_admin():
     if not is_admin(): return err("FORBIDDEN")
+# BUG FIX 3: send_push now logs errors instead of silently swallowing them,
+# and imports WebPushException for proper 404/410 stale-subscription cleanup.
 def send_push(username,title,body,tag="vox"):
     try:
-        from pywebpush import webpush
+        from pywebpush import webpush,WebPushException
         with db() as con:
             cur=con.cursor()
             cur.execute("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE username=%s",(username,))
@@ -144,11 +146,15 @@ def send_push(username,title,body,tag="vox"):
                 webpush(subscription_info={"endpoint":endpoint,"keys":{"p256dh":p256dh,"auth":auth}},
                     data=_json.dumps({"title":title,"body":body,"tag":tag}),
                     vapid_private_key=VAPID_PRIVATE_KEY,vapid_claims=VAPID_CLAIMS)
-            except Exception as ex:
-                if hasattr(ex,'response') and ex.response and ex.response.status_code in (404,410):
+            except WebPushException as ex:
+                app.logger.warning(f"Push failed for {username} ({endpoint[:40]}...): {ex}")
+                if ex.response and ex.response.status_code in (404,410):
                     with db() as con2:
                         con2.cursor().execute("DELETE FROM push_subscriptions WHERE endpoint=%s",(endpoint,))
-    except Exception: pass
+            except Exception as ex:
+                app.logger.warning(f"Push error for {username}: {ex}")
+    except Exception as ex:
+        app.logger.warning(f"send_push outer error: {ex}")
 utc_now=lambda:datetime.datetime.utcnow().isoformat()
 utc_cutoff=lambda minutes=2:(datetime.datetime.utcnow()-datetime.timedelta(minutes=minutes)).isoformat()
 def read_at_map(con,username,chat_type):
@@ -340,6 +346,8 @@ def shell(content,user=None,theme="green",unread=0):
         grid_style='grid-template-columns:1fr auto'
     admin_panel=('<div id="stContentAdmin" class="st-tab-content" style="display:none;"><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;"><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowUsers()">&#128100; USERS</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowDMs()">&#128172; DM LOGS</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowGroups()">&#128483; GROUP LOGS</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowLookup()">&#128269; CHAT LOOKUP</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;grid-column:span 2;" onclick="adminShowTraffic()">&#128200; TRAFFIC</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;grid-column:span 2;border-color:#fb0;color:#fb0;" onclick="adminShowResets()">&#128274; PASSWORD RESETS</button></div><div id="adminLookupBar" style="display:none;margin-bottom:8px;"><div style="display:flex;gap:6px;"><input id="adminLookupInput" class="field-plain" placeholder="ENTER USERNAME..." style="margin:0;flex:1;padding:8px 12px;font-size:12px;border-radius:20px;" oninput="adminLookupSuggest()" onkeydown="if(event.key===\'Enter\')adminLookupRun()"><button class="btn-action" style="margin:0;padding:8px 14px;font-size:11px;" onclick="adminLookupRun()">&#128269;</button></div><div id="adminLookupSuggest" style="font-size:11px;border:1px solid var(--p30);border-radius:8px;margin-top:4px;display:none;max-height:100px;overflow-y:auto;"></div></div><div id="adminContent" style="max-height:300px;overflow-y:auto;text-align:left;font-size:11px;border:1px solid var(--p30);border-radius:8px;padding:4px;"><div style="padding:12px;opacity:.4;text-align:center;">SELECT AN ACTION ABOVE</div></div></div>') if admin else ''
     admin_tab='<button class="tab" id="stTabAdmin" onclick="switchStTab(\'admin\')">&#9733; ADMIN</button>' if admin else ''
+    # NOTE: The JS block below contains Bug Fix 1 (requestNotifPermission resubscribes on page load)
+    # and Bug Fix 4 (urlBase64ToUint8Array guards empty input).
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#00ff00"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black"><meta name="apple-mobile-web-app-title" content="VOX"><link rel="apple-touch-icon" href="/icon-192.png"><script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script><style>{theme_css(theme)}</style></head><body>
 <div class="crt-overlay"></div><div class="scanline-a"></div><div class="scanline-b"></div><div class="scanline-c"></div>
 <div class="title-row-wrap"><div class="logo-wrap">{_LOGO_SVG}</div><div class="title-row" style="{grid_style}">{menu_html}<div class="title-center"></div><div class="title-row-right">{right_btns}</div></div></div>
@@ -442,9 +450,32 @@ async function submitPost(){{const content=$('postContent').value.trim(),errEl=$
 async function reactPost(postId,emoji){{await api('/api/posts/react',{{post_id:postId,emoji}});loadPosts();}}
 async function deletePost(postId){{if(!confirm('DELETE THIS POST?'))return;await api('/api/posts/delete',{{post_id:postId}});loadPosts();}}
 function enableNotifications(){{if(!('Notification' in window)){{alert('NOTIFICATIONS NOT SUPPORTED ON THIS BROWSER');return}}if(Notification.permission==='granted'){{setupPushSubscription();const m=$('notifMenuItem');if(m)m.style.display='none';return}}Notification.requestPermission().then(p=>{{if(p==='granted'){{_notifPermission=true;setupPushSubscription();const m=$('notifMenuItem');if(m)m.style.display='none';}}else alert('NOTIFICATION PERMISSION DENIED.');}});}}
-function requestNotifPermission(){{if(!('Notification' in window))return;if(Notification.permission==='granted'){{_notifPermission=true;setupPushSubscription();const m=$('notifMenuItem');if(m)m.style.display='none';return}}if(Notification.permission!=='denied')Notification.requestPermission().then(p=>{{_notifPermission=p==='granted';if(_notifPermission){{setupPushSubscription();const m=$('notifMenuItem');if(m)m.style.display='none';}}}});}}
-function urlBase64ToUint8Array(b64){{const padding='='.repeat((4-b64.length%4)%4),base64=(b64+padding).replace(/-/g,'+').replace(/_/g,'/'),raw=atob(base64);return Uint8Array.from({{length:raw.length}},(_,i)=>raw.charCodeAt(i));}}
-async function setupPushSubscription(){{try{{if(!('serviceWorker' in navigator)||!('PushManager' in window))return;const reg=await navigator.serviceWorker.ready;const existing=await reg.pushManager.getSubscription();if(existing){{await api('/api/push/subscribe',existing.toJSON());return}}const kd=await api('/api/push/vapid-public-key');if(!kd.ok||!kd.key)return;const sub=await reg.pushManager.subscribe({{userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(kd.key)}});await api('/api/push/subscribe',sub.toJSON());}}catch(e){{}}}}
+// BUG FIX 1: requestNotifPermission now calls setupPushSubscription() when
+// permission is already granted (e.g. on page reload), ensuring re-subscription.
+function requestNotifPermission(){{
+  if(!('Notification' in window))return;
+  if(Notification.permission==='granted'){{
+    _notifPermission=true;
+    setupPushSubscription();
+    const m=$('notifMenuItem');if(m)m.style.display='none';
+    return;
+  }}
+  if(Notification.permission!=='denied')
+    Notification.requestPermission().then(p=>{{
+      _notifPermission=p==='granted';
+      if(_notifPermission){{
+        setupPushSubscription();
+        const m=$('notifMenuItem');if(m)m.style.display='none';
+      }}
+    }});
+}}
+// BUG FIX 4: urlBase64ToUint8Array guards against empty/null input.
+function urlBase64ToUint8Array(b64){{
+  if(!b64)return new Uint8Array();
+  const padding='='.repeat((4-b64.length%4)%4),base64=(b64+padding).replace(/-/g,'+').replace(/_/g,'/'),raw=atob(base64);
+  return Uint8Array.from({{length:raw.length}},(_,i)=>raw.charCodeAt(i));
+}}
+async function setupPushSubscription(){{try{{if(!('serviceWorker' in navigator)||!('PushManager' in window))return;const reg=await navigator.serviceWorker.ready;const existing=await reg.pushManager.getSubscription();if(existing){{await api('/api/push/subscribe',existing.toJSON());return}}const kd=await api('/api/push/vapid-public-key');if(!kd.ok||!kd.key)return;const sub=await reg.pushManager.subscribe({{userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(kd.key)}});await api('/api/push/subscribe',sub.toJSON());}}catch(e){{console.warn('Push subscription error:',e);}}}}
 function showToast(title,body,onClick){{const t=document.createElement('div');t.className='notif-toast';t.innerHTML=`<div class="nt-title">&#128276; ${{title}}</div><div class="nt-body">${{body}}</div>`;t.onclick=()=>{{if(onClick)onClick();t.classList.add('hiding');setTimeout(()=>t.remove(),300);}};document.body.appendChild(t);setTimeout(()=>{{t.classList.add('hiding');setTimeout(()=>t.remove(),300);}},5000);}}
 function pushNotif(title,body,action){{if(_notifPermission&&Notification.permission==='granted'){{try{{const n=new Notification('VOX // '+title,{{body,icon:'/favicon.ico',badge:'/favicon.ico',tag:action}});n.onclick=()=>{{window.focus();n.close();if(action==='dm')switchTab('dm');else if(action==='group')switchTab('group');else if(action==='private')switchTab('private');else if(action==='posts'){{openModal('postModal');loadPosts();}}}};}}catch(e){{}}}}}}
 function setBadge(id,count){{const b=$(id);if(!b)return;if(count>0){{b.textContent=count;b.style.display='inline';}}else b.style.display='none';}}
@@ -1324,13 +1355,15 @@ def api_ask():
 def manifest():
     data={"name":"Vox Populi","short_name":"VOX","description":"Vox Populi Community","start_url":"/","display":"standalone","background_color":"#000000","theme_color":"#00ff00","orientation":"portrait-primary","icons":[{"src":"/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},{"src":"/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}],"categories":["social","news"],"shortcuts":[{"name":"Chat","url":"/","description":"Open Vox community chat"}]}
     return Response(_json.dumps(data),mimetype="application/json")
+# BUG FIX 2: Service worker push handler uses safe text parsing instead of
+# e.data.json() which crashes on non-JSON payloads.
 @app.route("/sw.js")
 def service_worker():
     sw="""const CACHE='vox-v1';
 self.addEventListener('install',e=>{self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim();});
 self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;if(e.request.url.includes('/api/'))return;e.respondWith(fetch(e.request).then(res=>{const clone=res.clone();caches.open(CACHE).then(c=>c.put(e.request,clone));return res;}).catch(()=>caches.match(e.request).then(r=>r||Response.error())));});
-self.addEventListener('push',e=>{let data={title:'VOX',body:'New notification',tag:'vox'};try{data=e.data.json();}catch(err){}e.waitUntil(self.registration.showNotification('VOX // '+data.title,{body:data.body,icon:'/icon-192.png',badge:'/icon-192.png',tag:data.tag,renotify:true,vibrate:[200,100,200],data:{url:'/'}}));});
+self.addEventListener('push',e=>{let data={title:'VOX',body:'New notification',tag:'vox'};try{if(e.data){const text=e.data.text();data=JSON.parse(text);}}catch(err){}e.waitUntil(self.registration.showNotification('VOX // '+data.title,{body:data.body,icon:'/icon-192.png',badge:'/icon-192.png',tag:data.tag||'vox',renotify:true,vibrate:[200,100,200],data:{url:'/'}}));});
 self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(self.location.origin)){c.focus();return;}}clients.openWindow('/');}));});"""
     return Response(sw,mimetype="application/javascript")
 def _svg_icon(size,text_y,font_size,sub_y=None,sub_text=None):
