@@ -43,12 +43,12 @@ THEMES={
     "amber":{"p":"#ffb300","bg":"#0a0500","ac":"#332200","name":"AMBER"},
     "red":{"p":"#ff2222","bg":"#0a0000","ac":"#330000","name":"ALERT"},
     "purple":{"p":"#cc44ff","bg":"#050010","ac":"#220033","name":"NEXUS"},
-    "white":{"p":"#ffffff","bg":"#050505","ac":"#222222","name":"GHOST"},
+    "white":{"p":"#4488ff","bg":"#000814","ac":"#001a3a","name":"GHOST"},
 }
 NAV_ITEMS=[
     ("fa-broadcast-tower","COMMS","https://www.seeedstudio.com/XIAO-ESP32S3-for-Meshtastic-LoRa-with-3D-Printed-Enclosure-p-6314.html"),
-    ("fa-dove","VOX POPULI","#"),("fa-link","LINKTREE","#"),("fa-vault","P-VAULT","#"),
-    ("fa-shield-alt","P-BLK","#"),("fa-user-check","P-VETT","#"),("fa-globe","VOX WEB","#"),("fa-circle","BLANK 2","#"),
+    ("fa-dove","VOX POPULI","#"),("fa-link","LINKTREE","#"),("fa-vault","\U0001f510 P-VAULT","#"),
+    ("fa-shield-alt","P-BLK","#"),("fa-user-check","P-VETT","#"),("fa-globe","VOX NEWS","#"),("fa-circle","BLANK 2","#"),
 ]
 @contextmanager
 def db():
@@ -587,7 +587,11 @@ def api_posts_create():
     content=(request.json or {}).get("content","").strip()
     if not content: return err("EMPTY POST")
     if len(content)>500: return err("TOO LONG")
-    with db() as con: execute(con,"INSERT INTO posts(username,content) VALUES(%s,%s)",(me(),content))
+    u=me()
+    with db() as con:
+        execute(con,"INSERT INTO posts(username,content) VALUES(%s,%s)",(u,content))
+        members=[r[0] for r in fetchall(con,"SELECT username FROM users WHERE username!=%s",(u,))]
+    for member in members: send_push(member,"\U0001f4e2 COMMUNITY BOARD",f"{u}: {content[:80]}",tag="posts")
     return ok()
 @app.route("/api/posts/react",methods=["POST"])
 def api_posts_react():
@@ -1113,3 +1117,4 @@ def handle_exception(e):
     import traceback;app.logger.error(traceback.format_exc())
     return f"<pre style='background:#111;color:#f44;padding:20px;font-size:12px;'>ERROR:\n{traceback.format_exc()}</pre>",500
 if __name__=="__main__": app.run(debug=False)
+
