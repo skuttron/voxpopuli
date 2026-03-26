@@ -41,9 +41,13 @@ THEMES={
 }
 NAV_ITEMS=[
     ("fa-broadcast-tower","COMMS","https://www.seeedstudio.com/XIAO-ESP32S3-for-Meshtastic-LoRa-with-3D-Printed-Enclosure-p-6314.html"),
-    ("fa-shield-alt","SURVIVAL","#"),("fa-box-open","STOCK UP","#"),("fa-map-marked-alt","MAPS","#"),
-    ("fa-archive","CANNING","#"),("fa-shopping-cart","SHOPPING","#"),("fa-lightbulb","TIPS","#"),
-    ("fa-hand-holding-heart","DONATE","#"),
+    ("fa-dove","VOX POPULI","#"),
+    ("fa-link","LINKTREE","#"),
+    ("fa-vault","P-VAULT","#"),
+    ("fa-shield-alt","P-BLK","#"),
+    ("fa-user-check","P-VETT","#"),
+    ("fa-globe","VOX WEB","#"),
+    ("fa-circle","BLANK 2","#"),
 ]
 @contextmanager
 def db():
