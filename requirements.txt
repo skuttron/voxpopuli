@@ -4,3 +4,4 @@ gunicorn
 werkzeug==2.3.7
 psycopg2-binary
 pywebpush
+Fernet
