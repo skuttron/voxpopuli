@@ -3,17 +3,20 @@ from flask import Flask,request,session,redirect,jsonify,Response
 import psycopg2,psycopg2.extras,os,hashlib,datetime,urllib.request,re,html as _html,pathlib,json as _json,time
 from contextlib import contextmanager
 from cryptography.fernet import Fernet
+
 _BASE=pathlib.Path(__file__).parent.resolve()
 app=Flask(__name__)
 app.secret_key=os.environ.get("SECRET_KEY","fallback-if-missing")
 app.config['PERMANENT_SESSION_LIFETIME']=datetime.timedelta(days=90)
 app.config['SESSION_PERMANENT']=True
+
 def get_database_url():
     url=os.environ.get("DATABASE_URL","")
-    if not url: raise RuntimeError("DATABASE_URL environment variable is not set.")
+    if not url: raise RuntimeError("DATABASE_URL not set.")
     if url.startswith("postgres://"): url="postgresql://"+url[len("postgres://"):]
     if "sslmode" not in url: url+=("&" if "?" in url else "?")+"sslmode=require"
     return url
+
 DATABASE_URL=get_database_url()
 ADMIN_USER="Eagleone"
 _KEY_FILE=str(_BASE/"secret.key")
@@ -49,41 +52,29 @@ NAV_ITEMS=[
     ("fa-globe","VOX WEB","#"),
     ("fa-circle","BLANK 2","#"),
 ]
+
 @contextmanager
 def db():
     last_exc=None
     for attempt in range(5):
         try:
             con=psycopg2.connect(DATABASE_URL,connect_timeout=10)
-            con.autocommit=False
-            break
+            con.autocommit=False; break
         except psycopg2.OperationalError as exc:
-            last_exc=exc
-            wait=2**attempt
+            last_exc=exc; wait=2**attempt
             app.logger.warning(f"DB connect attempt {attempt+1} failed, retrying in {wait}s: {exc}")
             time.sleep(wait)
-    else:
-        raise last_exc
+    else: raise last_exc
     try:
-        yield con
-        con.commit()
+        yield con; con.commit()
     except Exception:
-        con.rollback()
-        raise
+        con.rollback(); raise
     finally:
         con.close()
+
 def execute(con,sql,params=None):
-    cur=con.cursor()
-    cur.execute(sql,params or ())
-    return cur
-def init_db():
-    for attempt in range(5):
-        try: _do_init_db(); return
-        except Exception as exc:
-            wait=3**attempt
-            app.logger.warning(f"init_db attempt {attempt+1} failed, retrying in {wait}s: {exc}")
-            time.sleep(wait)
-    raise RuntimeError("Could not initialise database after 5 attempts.")
+    cur=con.cursor(); cur.execute(sql,params or ()); return cur
+
 _TABLES=[
     "CREATE TABLE IF NOT EXISTS users(id SERIAL PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,theme TEXT DEFAULT 'green',is_admin INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS messages(id SERIAL PRIMARY KEY,sender TEXT NOT NULL,recipient TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP,read INTEGER DEFAULT 0)",
@@ -104,6 +95,7 @@ _TABLES=[
     "CREATE TABLE IF NOT EXISTS push_subscriptions(username TEXT NOT NULL,endpoint TEXT NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,PRIMARY KEY(username,endpoint))",
     "CREATE TABLE IF NOT EXISTS password_resets(id SERIAL PRIMARY KEY,username TEXT NOT NULL,temp_password TEXT,status TEXT DEFAULT 'pending',requested_at TEXT DEFAULT CURRENT_TIMESTAMP)",
 ]
+
 def _do_init_db():
     with db() as con:
         cur=con.cursor()
@@ -112,37 +104,44 @@ def _do_init_db():
         cur.execute("UPDATE users SET is_admin=1 WHERE username=%s",(ADMIN_USER,))
         for ch in ["GENERAL","SURVIVAL","BARTER","HOMESTEAD"]:
             cur.execute("INSERT INTO groups(name,created_by) VALUES(%s,%s) ON CONFLICT (name) DO NOTHING",(ch,"SYSTEM"))
-        cur.execute("SELECT username FROM users")
-        users=[r[0] for r in cur.fetchall()]
-        cur.execute("SELECT id FROM groups")
-        groups=[r[0] for r in cur.fetchall()]
-        cur.execute("SELECT group_id,username FROM group_banned")
-        banned={(r[0],r[1]) for r in cur.fetchall()}
+        cur.execute("SELECT username FROM users"); users=[r[0] for r in cur.fetchall()]
+        cur.execute("SELECT id FROM groups"); groups=[r[0] for r in cur.fetchall()]
+        cur.execute("SELECT group_id,username FROM group_banned"); banned={(r[0],r[1]) for r in cur.fetchall()}
         for gid in groups:
             for uname in users:
                 if (gid,uname) not in banned:
                     cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,uname))
+
+def init_db():
+    for attempt in range(5):
+        try: _do_init_db(); return
+        except Exception as exc:
+            wait=3**attempt
+            app.logger.warning(f"init_db attempt {attempt+1} failed, retrying in {wait}s: {exc}")
+            time.sleep(wait)
+    raise RuntimeError("Could not initialise database after 5 attempts.")
+
 init_db()
+
 def is_admin(u=None):
     u=u or me()
     if not u: return False
     if u==ADMIN_USER: return True
     with db() as con:
-        cur=con.cursor()
-        cur.execute("SELECT is_admin FROM users WHERE username=%s",(u,))
-        r=cur.fetchone()
+        cur=con.cursor(); cur.execute("SELECT is_admin FROM users WHERE username=%s",(u,)); r=cur.fetchone()
     return bool(r and r[0])
+
 def require_login():
     if not logged_in(): return err("NOT LOGGED IN")
+
 def require_admin():
     if not is_admin(): return err("FORBIDDEN")
+
 def send_push(username,title,body,tag="vox"):
     try:
         from pywebpush import webpush
         with db() as con:
-            cur=con.cursor()
-            cur.execute("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE username=%s",(username,))
-            subs=cur.fetchall()
+            cur=con.cursor(); cur.execute("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE username=%s",(username,)); subs=cur.fetchall()
         for endpoint,p256dh,auth in subs:
             try:
                 webpush(subscription_info={"endpoint":endpoint,"keys":{"p256dh":p256dh,"auth":auth}},
@@ -150,20 +149,24 @@ def send_push(username,title,body,tag="vox"):
                     vapid_private_key=VAPID_PRIVATE_KEY,vapid_claims=VAPID_CLAIMS)
             except Exception as ex:
                 if hasattr(ex,'response') and ex.response and ex.response.status_code in (404,410):
-                    with db() as con2:
-                        con2.cursor().execute("DELETE FROM push_subscriptions WHERE endpoint=%s",(endpoint,))
+                    with db() as con2: con2.cursor().execute("DELETE FROM push_subscriptions WHERE endpoint=%s",(endpoint,))
     except Exception: pass
+
 utc_now=lambda:datetime.datetime.utcnow().isoformat()
 utc_cutoff=lambda minutes=2:(datetime.datetime.utcnow()-datetime.timedelta(minutes=minutes)).isoformat()
+
 def read_at_map(con,username,chat_type):
     cur=con.cursor()
     cur.execute("SELECT chat_id,read_at FROM chat_read_at WHERE username=%s AND chat_type=%s",(username,chat_type))
     return {r[0]:r[1] for r in cur.fetchall()}
+
 def unread_count(con,table,id_col,id_val,username,cutoff):
     cur=con.cursor()
     cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {id_col}=%s AND sender!=%s AND timestamp>%s",(id_val,username,cutoff))
     return cur.fetchone()[0]
+
 dec_messages=lambda rows:[{"sender":r[0],"content":dec(r[1]),"timestamp":r[2]} for r in rows]
+
 @app.before_request
 def track_visit():
     if request.path.startswith(("/api","/static")): return
@@ -174,6 +177,7 @@ def track_visit():
         u=session.get("username")
         if u:
             cur.execute("INSERT INTO user_sessions(username,last_seen) VALUES(%s,%s) ON CONFLICT (username) DO UPDATE SET last_seen=EXCLUDED.last_seen",(u,now))
+
 def theme_css(t):
     c=THEMES.get(t,THEMES["green"])
     p,bg,ac=c["p"],c["bg"],c["ac"]
@@ -219,7 +223,6 @@ def theme_css(t):
         ".column{border:3px solid var(--p);border-radius:var(--r);padding:24px 20px;background:transparent;box-shadow:0 0 20px var(--p30);display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;z-index:2}"
         ".column h3{margin:0 0 10px;font-size:16px}.column p{margin:0;font-size:13px;opacity:.8}"
         ".btn-action{border:2px solid var(--p);border-radius:8px;padding:10px 22px;color:var(--p);text-decoration:none;display:inline-block;background:var(--p10);margin-top:14px;cursor:pointer;font-family:'Courier New',monospace;font-size:13px;text-transform:uppercase;transition:.2s;position:relative;z-index:2}"
-        ".top-video{display:block;width:min(100%,900px);height:480px;margin:0 auto 20px;border:2px solid var(--p);box-shadow:0 0 24px var(--p);position:relative;z-index:2;box-sizing:border-box}"
         ".modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.93);z-index:9000;justify-content:center;align-items:flex-start;overflow-y:auto;padding:20px;box-sizing:border-box}"
         ".modal-overlay.open{display:flex}"
         ".modal-box{border:3px solid var(--p);border-radius:var(--r);padding:28px 24px;min-width:min(340px,92vw);max-width:540px;width:100%;background:#000;box-shadow:0 0 60px var(--p);text-align:center;margin:auto;position:relative;z-index:2}"
@@ -287,7 +290,7 @@ def theme_css(t):
         ".content-box{width:100%;padding:12px 14px;font-size:13px;line-height:1.6;margin:12px 0;box-sizing:border-box}"
         ".three-column-grid{grid-template-columns:1fr;gap:10px;padding:2px;margin-bottom:12px}.column{padding:14px 12px}"
         ".column h3{font-size:12px}.column p{font-size:12px}.btn-action{font-size:11px;padding:7px 14px;margin-top:10px}"
-        ".top-video{height:200px;width:100%;margin:0 0 12px}.modal-overlay{padding:20px;align-items:center}"
+        ".modal-overlay{padding:20px;align-items:center}"
         ".modal-box{max-width:96%;width:100%;border-radius:var(--r);padding:20px 16px;margin:auto;max-height:90vh;overflow-y:auto}"
         ".modal-box h2{font-size:13px;letter-spacing:2px;margin-bottom:10px}.field-plain{font-size:12px;padding:9px 10px}"
         ".field{font-size:12px;padding:9px 36px 9px 10px}.theme-grid{gap:5px}.theme-btn{font-size:9px;padding:6px 2px}"
@@ -304,10 +307,13 @@ def theme_css(t):
         ".bubble-avatar{width:30px;height:30px;font-size:10px}.comms-compose input{font-size:14px;padding:12px 14px}"
         ".send-btn{padding:11px 14px;font-size:12px}.mobile-back-btn{display:flex!important}"
         "}@media(min-width:701px){.mobile-back-btn{display:none!important}.comms-sidebar,.comms-main{display:flex}}")
+
 def pw_field(fid,ph,ac="current-password"):
     return f'<div class="field-wrap"><input class="field" id="{fid}" placeholder="{ph}" type="password" autocomplete="{ac}"><button class="eye-btn" type="button" onclick="togglePw(\'{fid}\',this)">&#128065;</button></div>'
+
 def theme_btns(fn):
     return "".join(f'<button class="theme-btn" style="color:{c};border-color:{c};" onclick="{fn}(\'{k}\')">&#9679; {k.upper()}</button>' for k,c in [("green","#0f0"),("cyan","#0ff"),("amber","#fb0"),("red","#f22"),("purple","#c4f"),("white","#fff")])
+
 def cyber_box(title,body,*,title_right="",extra_header="",footer="",radius="var(--r)",mb="24px",max_h=None,border_top=True,body_style=""):
     mh=f"max-height:{max_h};overflow-y:auto;" if max_h else ""
     return (f'<div class="command-wrapper" style="width:100%;margin-bottom:{mb};box-sizing:border-box;">'
@@ -316,6 +322,7 @@ def cyber_box(title,body,*,title_right="",extra_header="",footer="",radius="var(
         f'{extra_header}'
         f'<div style="border:2px solid var(--p);border-top:none;border-radius:0 0 {radius} {radius};{mh}{body_style}">{body}</div>'
         f'{footer}</div>')
+
 _LOGO_SVG="""<svg viewBox="0 0 400 420" width="260" height="273" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;"><defs><style>@keyframes spinFwd{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes spinRev{from{transform:rotate(0deg)}to{transform:rotate(-360deg)}}@keyframes fireGlow{0%,100%{filter:drop-shadow(0 0 2px var(--p))}50%{filter:drop-shadow(0 0 4px var(--p))}}.orbit-a{transform-origin:200px 195px;animation:spinFwd 8s linear infinite}.orbit-b{transform-origin:200px 195px;animation:spinRev 12s linear infinite}.logo-badge{animation:fireGlow 2.2s ease-in-out infinite}</style><radialGradient id="lgbgG" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="var(--ac)"/><stop offset="100%" stop-color="#000a06"/></radialGradient><radialGradient id="lgrimG" cx="50%" cy="35%" r="65%"><stop offset="0%" stop-color="var(--p)" stop-opacity="0.15"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient><filter id="lgglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter><clipPath id="lgcirc"><circle cx="200" cy="195" r="122"/></clipPath><path id="lgarcB" d="M 98,238 A 112,112 0 0,0 302,238"/></defs>
 <g stroke="var(--p)" stroke-width="1.2" opacity="0.45"><line x1="200" y1="16" x2="200" y2="32"/><line x1="200" y1="358" x2="200" y2="374"/><line x1="28" y1="195" x2="44" y2="195"/><line x1="356" y1="195" x2="372" y2="195"/><line x1="64" y1="71" x2="75" y2="82"/><line x1="336" y1="71" x2="325" y2="82"/><line x1="64" y1="319" x2="75" y2="308"/><line x1="336" y1="319" x2="325" y2="308"/></g>
 <circle cx="200" cy="195" r="158" fill="#050a08" stroke="var(--p)" stroke-width="1.5" opacity="0.5"/><circle cx="200" cy="195" r="151" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.25"/>
@@ -330,6 +337,7 @@ _LOGO_SVG="""<svg viewBox="0 0 400 420" width="260" height="273" xmlns="http://w
 <g font-family="'Courier New',Courier,monospace" font-size="7.5" fill="var(--p)" opacity="0.38"><text x="30" y="290">N-15-77</text><text x="30" y="300">SYS:ACTIV</text><text x="30" y="310">STEALTH MODE</text><text x="280" y="290">N-15-77</text><text x="275" y="300">STR:ON</text><text x="268" y="310">VOX.POPULI.LVL3</text></g>
 <path d="M 56,195 A 144,144 0 0,1 344,195" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.2" stroke-dasharray="3 6"/>
 </svg>"""
+
 def shell(content,user=None,theme="green",unread=0):
     t=THEMES.get(theme,THEMES["green"])
     admin=is_admin(user)
@@ -337,18 +345,19 @@ def shell(content,user=None,theme="green",unread=0):
         at_badge=' <span style="font-size:9px;opacity:.8;margin-left:5px;letter-spacing:1px;vertical-align:middle;">&#9733; ADMIN</span>' if admin else ''
         menu_html=f'<div class="menu-wrap"><div class="menu-trigger" onclick="event.stopPropagation();document.getElementById(\'accountMenu\').classList.toggle(\'open\')" style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:8px;"><span style="font-size:16px;">&#9776;</span><span style="border-left:1px solid var(--p);opacity:.4;height:16px;"></span><span style="font-size:12px;letter-spacing:1px;">{user}</span>{at_badge}<span style="font-size:10px;opacity:.6;">&#9663;</span></div><div class="dropdown-menu" id="accountMenu"><div class="dropdown-item" style="opacity:.5;font-size:10px;cursor:default;pointer-events:none;padding:8px 16px;">&#9658; {user.upper()} [{t["name"]}]</div><div class="dropdown-divider"></div><a class="dropdown-item" data-action="settings"><i class="fas fa-cog"></i> SETTINGS</a><a class="dropdown-item" onclick="enableNotifications()" id="notifMenuItem"><i class="fas fa-bell"></i> ENABLE NOTIFICATIONS</a><a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a></div></div>'
         grid_style='grid-template-columns:auto 1fr auto'
-        right_btns='<button class="hero-btn" onclick="openModal(\'postModal\');loadPosts();markPostsRead();" style="font-size:11px;padding:7px 14px;letter-spacing:1px;">&#9998; POST <span id="badgePosts" style="display:none;background:#000;color:var(--p);border:1px solid var(--p);border-radius:50%;padding:1px 5px;font-size:9px;margin-left:3px;"></span></button>'
+        right_btns=''
     else:
         menu_html=''
         right_btns='<button class="hero-btn" data-action="login">&#9658; LOGIN</button><button class="hero-btn" data-action="register">&#9658; JOIN</button>'
         grid_style='grid-template-columns:1fr auto'
+
     admin_panel=('<div id="stContentAdmin" class="st-tab-content" style="display:none;"><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;"><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowUsers()">&#128100; USERS</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowDMs()">&#128172; DM LOGS</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowGroups()">&#128483; GROUP LOGS</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;" onclick="adminShowLookup()">&#128269; CHAT LOOKUP</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;grid-column:span 2;" onclick="adminShowTraffic()">&#128200; TRAFFIC</button><button class="btn-action" style="margin:0;padding:8px;font-size:11px;grid-column:span 2;border-color:#fb0;color:#fb0;" onclick="adminShowResets()">&#128274; PASSWORD RESETS</button></div><div id="adminLookupBar" style="display:none;margin-bottom:8px;"><div style="display:flex;gap:6px;"><input id="adminLookupInput" class="field-plain" placeholder="ENTER USERNAME..." style="margin:0;flex:1;padding:8px 12px;font-size:12px;border-radius:20px;" oninput="adminLookupSuggest()" onkeydown="if(event.key===\'Enter\')adminLookupRun()"><button class="btn-action" style="margin:0;padding:8px 14px;font-size:11px;" onclick="adminLookupRun()">&#128269;</button></div><div id="adminLookupSuggest" style="font-size:11px;border:1px solid var(--p30);border-radius:8px;margin-top:4px;display:none;max-height:100px;overflow-y:auto;"></div></div><div id="adminContent" style="max-height:300px;overflow-y:auto;text-align:left;font-size:11px;border:1px solid var(--p30);border-radius:8px;padding:4px;"><div style="padding:12px;opacity:.4;text-align:center;">SELECT AN ACTION ABOVE</div></div></div>') if admin else ''
     admin_tab='<button class="tab" id="stTabAdmin" onclick="switchStTab(\'admin\')">&#9733; ADMIN</button>' if admin else ''
+
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#00ff00"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black"><meta name="apple-mobile-web-app-title" content="VOX"><link rel="apple-touch-icon" href="/icon-192.png"><script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script><style>{theme_css(theme)}</style></head><body>
 <div class="crt-overlay"></div><div class="scanline-a"></div><div class="scanline-b"></div><div class="scanline-c"></div>
 <div class="title-row-wrap"><div class="logo-wrap">{_LOGO_SVG}</div><div class="title-row" style="{grid_style}">{menu_html}<div class="title-center"></div><div class="title-row-right">{right_btns}</div></div></div>
 <div class="page-content" style="width:100%;max-width:960px;margin:0 auto;padding:0 12px 40px;box-sizing:border-box;">{content}</div>
-<div class="modal-overlay" id="postModal"><div class="modal-box" style="max-width:720px;width:96%;padding:0;overflow:hidden;">{cyber_box("// COMMUNITY BOARD //",'<div id="postFeed" style="max-height:380px;overflow-y:auto;background:rgba(0,0,0,.75);min-height:80px;"><div style="padding:16px;opacity:.4;text-align:center;font-size:11px;">LOADING...</div></div>',title_right='<button onclick="closeModal(\'postModal\')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:16px;padding:0 4px;">&#10006;</button>',footer='<div id="postErr" class="error-msg" style="padding:0 12px;margin:0;"></div><div style="padding:9px 10px;border-top:2px solid var(--p);display:flex;gap:7px;align-items:flex-end;background:rgba(0,0,0,.9);"><textarea id="postContent" placeholder="SHARE WITH THE COMMUNITY..." oninput="updatePostCount(this)" style="flex:1;padding:9px 14px;background:rgba(0,0,0,.8);border:2px solid var(--p);border-radius:12px;color:var(--p);font-family:\'Courier New\',monospace;font-size:12px;text-transform:none;resize:none;height:38px;max-height:120px;overflow-y:auto;line-height:1.4;box-sizing:border-box;" onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){{event.preventDefault();submitPost();}}"></textarea><div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;"><span id="postCount" style="font-size:9px;opacity:.3;">0/500</span><button class="send-btn" onclick="submitPost()">&#9658;</button></div></div>',mb="0",radius="0")}</div></div>
 <div class="modal-overlay" id="loginModal"><div class="modal-box"><h2>// ACCESS //</h2><div id="loginErr" class="error-msg"></div><input class="field-plain" id="loginUser" placeholder="USERNAME" type="text" autocomplete="username" style="text-transform:none;">{pw_field("loginPass","PASSWORD")}<br><button class="btn-action" onclick="doLogin()">&#9658; AUTHENTICATE</button><button class="btn-action" style="margin-left:8px;" onclick="closeModal('loginModal')">&#10006; CANCEL</button><div style="margin-top:14px;font-size:11px;opacity:.6;">FORGOT YOUR PASSWORD? <span style="text-decoration:underline;cursor:pointer;color:var(--p);" onclick="closeModal('loginModal');openModal('resetModal')">REQUEST A RESET</span></div></div></div>
 <div class="modal-overlay" id="resetModal"><div class="modal-box"><h2>// PASSWORD RESET //</h2><div style="font-size:11px;opacity:.6;margin-bottom:14px;">ENTER YOUR USERNAME AND AN ADMIN WILL SET A TEMPORARY PASSWORD FOR YOU.</div><div id="resetErr" class="error-msg"></div><div id="resetOk" class="success-msg"></div><input class="field-plain" id="resetUser" placeholder="YOUR USERNAME" type="text" style="text-transform:none;"><br><button class="btn-action" onclick="doResetRequest()">&#9658; REQUEST RESET</button><button class="btn-action" style="margin-left:8px;" onclick="closeModal('resetModal')">&#10006; CANCEL</button></div></div>
 <div class="modal-overlay" id="registerModal"><div class="modal-box"><h2>// ENLIST //</h2><div style="font-size:10px;opacity:.5;margin-bottom:10px;">&#9888; YOU MUST BE 18 OR OLDER TO JOIN</div><div id="regErr" class="error-msg"></div><input class="field-plain" id="regUser" placeholder="CHOOSE USERNAME" type="text" autocomplete="username" style="text-transform:none;">{pw_field("regPass","CHOOSE PASSWORD","new-password")}{pw_field("regPass2","CONFIRM PASSWORD","new-password")}<div class="section-label">DATE OF BIRTH:</div><input class="field-plain" id="regDob" type="date" style="color-scheme:dark;"><div class="section-label">SELECT THEME:</div><div class="theme-grid">{theme_btns("setRegTheme")}</div><br><button class="btn-action" onclick="doRegister()">&#9658; ENLIST</button><button class="btn-action" style="margin-left:8px;" onclick="closeModal('registerModal')">&#10006; CANCEL</button></div></div>
@@ -427,17 +436,18 @@ async function loadNewsFeed(){{
     if(status)status.textContent='UPDATED '+new Date().toLocaleTimeString();
   }}catch(e){{const feed=$('newsFeed');if(feed)feed.innerHTML='<div style="padding:12px;color:#f44;font-size:11px;">FEED ERROR</div>';}}
 }}
+// ── POSTS (Board tab) ──
+function markPostsRead(){{api('/api/mark-read',{{type:'posts',id:'posts'}});_prevNotif.posts=0;setBadge('badgeBoard',0);}}
 function updatePostCount(el){{const c=$('postCount');if(c)c.textContent=el.value.length+'/500';}}
-function markPostsRead(){{api('/api/mark-read',{{type:'posts',id:'posts'}});_prevNotif.posts=0;const b=$('badgePosts');if(b){{b.textContent='';b.style.display='none';}}}}
 async function loadPosts(){{
   const feed=$('postFeed');if(!feed)return;
   feed.innerHTML='<div style="padding:12px;opacity:.4;text-align:center;font-size:11px;">LOADING...</div>';
   const d=await api('/api/posts');
   if(!d.ok||!d.posts||!d.posts.length){{feed.innerHTML='<div style="padding:16px;opacity:.4;text-align:center;font-size:11px;">NO POSTS YET - BE THE FIRST!</div>';return}}
   const EMOJIS=[['&#128077;','&#128078;','&#10084;&#65039;','&#128514;','&#128558;','&#128545;','&#128293;'],['like','dislike','love','lol','wow','angry','fire']];
-  const me=d.me||'';
+  const myName=d.me||'';
   feed.innerHTML=d.posts.map(p=>{{
-    const mine=p.username===me;
+    const mine=p.username===myName;
     const rxBar=EMOJIS[0].map((e,i)=>{{const r=(p.reactions&&p.reactions[EMOJIS[1][i]])||{{count:0,mine:false}};return `<button onclick="reactPost(${{p.id}},'${{EMOJIS[1][i]}}')" style="background:${{r.mine?'var(--p)':'var(--p10)'}};color:${{r.mine?'#000':'var(--p)'}};border:1px solid ${{r.mine?'var(--p)':'var(--p30)'}};border-radius:20px;padding:2px 8px;font-size:12px;cursor:pointer;margin:2px;transition:.15s;">${{e}}${{r.count?' <b>'+r.count+'</b>':''}}</button>`;}}).join('');
     return `<div class="bubble-row ${{mine?'mine':''}}" style="padding:8px 10px;gap:8px;"><div class="bubble-avatar">${{p.username.substring(0,2).toUpperCase()}}</div><div class="bubble-content" style="max-width:85%;"><div class="bubble" style="${{mine?'':'background:var(--ac);border:1.5px solid var(--p30);border-radius:4px 16px 16px 16px;'}}"><div style="font-size:14px;line-height:1.5;text-transform:none;white-space:pre-wrap;word-break:break-word;">${{p.content}}</div><div style="margin-top:6px;">${{rxBar}}</div></div><div class="bubble-meta" style="display:flex;gap:8px;align-items:center;"><span>${{mine?'YOU':p.username}} &middot; ${{p.created_at}}</span>${{p.can_delete?`<button onclick="deletePost(${{p.id}})" style="background:none;border:none;color:#f44;cursor:pointer;font-size:10px;padding:0;font-family:'Courier New',monospace;">&#128465;</button>`:''}}</div></div></div>`;
   }}).join('');
@@ -450,19 +460,19 @@ function requestNotifPermission(){{if(!('Notification' in window))return;if(Noti
 function urlBase64ToUint8Array(b64){{const padding='='.repeat((4-b64.length%4)%4),base64=(b64+padding).replace(/-/g,'+').replace(/_/g,'/'),raw=atob(base64);return Uint8Array.from({{length:raw.length}},(_,i)=>raw.charCodeAt(i));}}
 async function setupPushSubscription(){{try{{if(!('serviceWorker' in navigator)||!('PushManager' in window))return;const reg=await navigator.serviceWorker.ready;const existing=await reg.pushManager.getSubscription();if(existing){{await api('/api/push/subscribe',existing.toJSON());return}}const kd=await api('/api/push/vapid-public-key');if(!kd.ok||!kd.key)return;const sub=await reg.pushManager.subscribe({{userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(kd.key)}});await api('/api/push/subscribe',sub.toJSON());}}catch(e){{}}}}
 function showToast(title,body,onClick){{const t=document.createElement('div');t.className='notif-toast';t.innerHTML=`<div class="nt-title">&#128276; ${{title}}</div><div class="nt-body">${{body}}</div>`;t.onclick=()=>{{if(onClick)onClick();t.classList.add('hiding');setTimeout(()=>t.remove(),300);}};document.body.appendChild(t);setTimeout(()=>{{t.classList.add('hiding');setTimeout(()=>t.remove(),300);}},5000);}}
-function pushNotif(title,body,action){{if(_notifPermission&&Notification.permission==='granted'){{try{{const n=new Notification('VOX // '+title,{{body,icon:'/favicon.ico',badge:'/favicon.ico',tag:action}});n.onclick=()=>{{window.focus();n.close();if(action==='dm')switchTab('dm');else if(action==='group')switchTab('group');else if(action==='private')switchTab('private');else if(action==='posts'){{openModal('postModal');loadPosts();}}}};}}catch(e){{}}}}}}
+function pushNotif(title,body,action){{if(_notifPermission&&Notification.permission==='granted'){{try{{const n=new Notification('VOX // '+title,{{body,icon:'/favicon.ico',badge:'/favicon.ico',tag:action}});n.onclick=()=>{{window.focus();n.close();if(action==='dm')switchTab('dm');else if(action==='group')switchTab('group');else if(action==='private')switchTab('private');else if(action==='board')switchTab('board');}}}};}}catch(e){{}}}}}}
 function setBadge(id,count){{const b=$(id);if(!b)return;if(count>0){{b.textContent=count;b.style.display='inline';}}else b.style.display='none';}}
 async function checkNotifications(){{
   try{{
     const d=await api('/api/notifications');if(!d.ok)return;
-    if(!_notifReady){{_prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,groups:d.groups||{{}},private_rooms:d.private_rooms||({{}})}};_notifReady=true;setBadge('badgeDM',d.dm);setBadge('badgeGroup',d.group);setBadge('badgePrivate',d.private);setBadge('badgePosts',d.posts);document.title=d.total>0?'('+d.total+') VOX':'VOX';return;}}
+    if(!_notifReady){{_prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,groups:d.groups||{{}},private_rooms:d.private_rooms||({{}})}};_notifReady=true;setBadge('badgeDM',d.dm);setBadge('badgeGroup',d.group);setBadge('badgePrivate',d.private);setBadge('badgeBoard',d.posts);document.title=d.total>0?'('+d.total+') VOX':'VOX';return;}}
     if(d.dm>0&&d.dm>_prevNotif.dm&&_prevNotif.dm>=0){{const diff=d.dm-Math.max(_prevNotif.dm,0);showToast('DIRECT MESSAGE',diff+' new message'+(diff>1?'s':''),()=>switchTab('dm'));pushNotif('DIRECT MESSAGE',diff+' new DM'+(diff>1?'s':''),'dm');}}
     const newGroups=d.groups||{{}},prevGroups=_prevNotif.groups||{{}};
     Object.entries(newGroups).forEach(([gid,info])=>{{const prevCount=(prevGroups[gid]&&prevGroups[gid].count)||0;if(info.count>prevCount){{const diff=info.count-prevCount;showToast('# '+info.name,diff+' new message'+(diff>1?'s':''),()=>{{switchTab('group');loadGroupThread(parseInt(gid),info.name,true);}});pushNotif('# '+info.name,diff+' new message'+(diff>1?'s':''),'group');}}}});
     const newPriv=d.private_rooms||{{}},prevPriv=_prevNotif.private_rooms||{{}};
     Object.entries(newPriv).forEach(([rid,info])=>{{const prevCount=(prevPriv[rid]&&prevPriv[rid].count)||0;if(info.count>prevCount){{const diff=info.count-prevCount;showToast('&#128274; '+info.name,diff+' new message'+(diff>1?'s':''),()=>{{switchTab('private');loadPrivateThread(parseInt(rid),info.name,true);}});pushNotif('&#128274; '+info.name,diff+' new message'+(diff>1?'s':''),'private');}}}});
-    if(d.posts>0&&d.posts>_prevNotif.posts&&_prevNotif.posts>=0){{showToast('COMMUNITY POST','New post from a member',()=>{{openModal('postModal');loadPosts();}});pushNotif('COMMUNITY','New community post','posts');}}
-    setBadge('badgeDM',d.dm);setBadge('badgeGroup',d.group);setBadge('badgePrivate',d.private);setBadge('badgePosts',d.posts);
+    if(d.posts>0&&d.posts>_prevNotif.posts&&_prevNotif.posts>=0){{showToast('COMMUNITY BOARD','New post from a member',()=>switchTab('board'));pushNotif('COMMUNITY','New community post','board');}}
+    setBadge('badgeDM',d.dm);setBadge('badgeGroup',d.group);setBadge('badgePrivate',d.private);setBadge('badgeBoard',d.posts);
     document.title=d.total>0?'('+d.total+') VOX':'VOX';
     _prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,groups:newGroups,private_rooms:newPriv}};
   }}catch(e){{}}
@@ -481,6 +491,7 @@ async function loadDMThread(username,updateSidebar=true){{activeDMUser=username;
 async function sendDM(){{const content=$('dmInput').value.trim();if(!content||!activeDMUser)return;$('dmInput').value='';const d=await api('/api/dm/send',{{to:activeDMUser,content}});if(!d.ok){{alert('ERROR: '+d.error);return}}loadDMThread(activeDMUser,true);}}
 async function loadGroups(){{const d=await api('/api/groups'),box=$('groupList');if(!d.ok||!d.groups.length){{box.innerHTML=`<div style="padding:10px;font-size:11px;opacity:.4;">${{d.ok?'NO CHANNELS':'LOGIN TO VIEW'}}</div>`;return}}box.innerHTML=d.groups.map(g=>`<div class="conv-item ${{activeGroupId==g.id?'active':''}}" onclick="loadGroupThread(${{g.id}},'${{g.name}}',true)"><span>${{g.locked?'&#128274;':'#'}}<span style="${{g.locked?'color:#fa0':g.banned?'color:#f44':''}}">${{g.name}}</span></span>${{g.banned?'<span style="font-size:9px;color:#f44;">BANNED</span>':g.unread>0?`<span style="background:var(--p);color:#000;border-radius:50%;padding:1px 5px;font-size:9px;font-weight:bold;">${{g.unread}}</span>`:(g.member?'<span style="font-size:9px;color:var(--p);">&#9679;</span>':'')}}</div>`).join('');}}
 async function createGroup(){{const name=$('newGroupName').value.trim().toUpperCase();if(!name)return;const d=await api('/api/groups/create',{{name}});$('newGroupName').value='';if(d.ok){{loadGroups();loadGroupThread(d.id,name,false)}}else alert('ERROR: '+d.error);}}
+async function deleteGroup(gid,gname){{if(!confirm('DELETE #'+gname+'?'))return;const d=await api('/api/admin/delete-channel',{{group_id:gid}});if(d.ok){{if(activeGroupId===gid){{activeGroupId=null;activeGroupName=null;$('groupThreadTitle').textContent='SELECT A CHANNEL';$('groupMessages').innerHTML='';$('groupCompose').style.display='none';}}loadGroups();}}else alert('ERROR: '+d.error);}}
 async function loadGroupThread(gid,gname,updateSidebar=true){{
   activeGroupId=gid;activeGroupName=gname;mobileShowChat('group');
   api('/api/mark-read',{{type:'group',id:gid}});
@@ -488,10 +499,10 @@ async function loadGroupThread(gid,gname,updateSidebar=true){{
   setBadge('badgeGroup',_prevNotif.group);
   const d=await api('/api/groups/'+gid+'/messages'),msgBox=$('groupMessages');
   if(!d.ok){{msgBox.innerHTML='<div style="opacity:.4;text-align:center;margin:auto;font-size:12px;">ERROR</div>';return}}
-  const hdr=$('groupThreadTitle');
   const lockBadge=d.locked?'<span style="color:#fa0;font-size:10px;margin-left:6px;">&#128274; LOCKED</span>':'';
   const renameBtnG=d.admin?`<button onclick="renameChat('group',${{gid}})" style="background:none;border:1px solid var(--p);border-radius:4px;color:var(--p);cursor:pointer;font-size:9px;padding:2px 7px;margin-left:6px;font-family:'Courier New',monospace;">&#9998;</button>`:'';
-  hdr.innerHTML='# '+(gname||'CHANNEL')+lockBadge+renameBtnG;
+  const delBtnG=d.admin?`<button onclick="deleteGroup(${{gid}},'${{gname}}')" style="background:none;border:1px solid #f44;border-radius:4px;color:#f44;cursor:pointer;font-size:9px;padding:2px 7px;margin-left:4px;font-family:'Courier New',monospace;">&#128465;</button>`:'';
+  $('groupThreadTitle').innerHTML='# '+(gname||'CHANNEL')+lockBadge+renameBtnG+delBtnG;
   const jlBtn=$('joinLeaveBtn');
   if(d.admin&&d.members&&d.members.length){{
     jlBtn.style.display='inline-block';jlBtn.textContent='&#128100; MEMBERS &#9663;';
@@ -533,14 +544,13 @@ function hideMemberSuggest(){{const b=$('memberSuggest');if(b)b.style.display='n
 async function addPrivateMember(){{hideMemberSuggest();const u=$('addMemberInput').value.trim();if(!u)return;const d=await api('/api/private/add-member',{{room_id:activePrivateRoomId,username:u}});if(!d.ok){{alert('ERROR: '+d.error);return}}const dd=$('privateMemberDropdown');if(dd)dd.remove();showPrivateMembers();}}
 async function removePrivateMember(u){{if(!confirm('REMOVE '+u+' FROM ROOM?'))return;await api('/api/private/remove-member',{{room_id:activePrivateRoomId,username:u}});const dd=$('privateMemberDropdown');if(dd)dd.remove();showPrivateMembers();}}
 async function renameChat(type,id){{const current=type==='group'?activeGroupName:activePrivateRoomName;const newName=prompt('RENAME CHAT:',current);if(!newName||!newName.trim()||newName.trim().toUpperCase()===current)return;const d=await api('/api/'+type+'/rename',{{id,name:newName.trim().toUpperCase()}});if(!d.ok){{alert('ERROR: '+d.error);return}}if(type==='group'){{activeGroupName=newName.trim().toUpperCase();loadGroupThread(id,activeGroupName,true);}}else{{activePrivateRoomName=newName.trim().toUpperCase();loadPrivateThread(id,activePrivateRoomName,true);}};}}
-function switchTab(tab){{['DM','Group','Private'].forEach(t=>{{$('tab'+t).classList.toggle('active',t.toLowerCase()===tab);$('tabContent'+t).classList.toggle('active',t.toLowerCase()===tab)}});if(tab==='dm'){{loadDMConversations();setBadge('badgeDM',0);api('/api/mark-read',{{type:'dm',id:activeDMUser||''}});_prevNotif.dm=0;}}else if(tab==='group')loadGroups();else if(tab==='private')loadPrivateRooms();}}
+function switchTab(tab){{['DM','Group','Private','Board'].forEach(t=>{{$('tab'+t).classList.toggle('active',t.toLowerCase()===tab);$('tabContent'+t).classList.toggle('active',t.toLowerCase()===tab)}});if(tab==='dm'){{loadDMConversations();setBadge('badgeDM',0);api('/api/mark-read',{{type:'dm',id:activeDMUser||''}});_prevNotif.dm=0;}}else if(tab==='group')loadGroups();else if(tab==='private')loadPrivateRooms();else if(tab==='board'){{loadPosts();markPostsRead();}}}}
 loadTrafficCounter();setInterval(loadTrafficCounter,10000);
 requestNotifPermission();checkNotifications();setInterval(checkNotifications,8000);
 loadOnlineUsers();setInterval(loadOnlineUsers,10000);
 if($('newsFeed')){{loadNewsFeed();setInterval(loadNewsFeed,300000);}}
 if($('dmConvList')){{
   loadDMConversations();loadGroups();loadPrivateRooms();
-  if(IS_ADMIN){{const gf=$('groupCreateFooter');if(gf)gf.style.display='block';}}
   if(isMobile()){{mobileShowSidebar('dm');mobileShowSidebar('group');mobileShowSidebar('private');}}
   setInterval(()=>{{if(activeDMUser)loadDMThread(activeDMUser,false);if(activeGroupId)loadGroupThread(activeGroupId,activeGroupName,false);if(activePrivateRoomId)loadPrivateThread(activePrivateRoomId,activePrivateRoomName,false);}},5000);
 }}
@@ -559,33 +569,76 @@ if($('dmConvList')){{
   }},50);
 }})();
 </script></body></html>"""
+
 @app.route("/")
 def home():
     user=session.get("username")
     theme=session.get("theme","green")
+    admin=is_admin(user)
+
     def _tile(i,l,h):
         if h.startswith("#"):
-            mid=h[1:]
-            cb=f"openModal('{mid}');loadPosts();markPostsRead();" if mid=="postModal" else f"openModal('{mid}');"
-            return f'<a class="tile" onclick="{cb}" style="cursor:pointer;"><i class="fas {i}"></i><div>| {l} |</div></a>'
-        return f'<a class="tile" href="{h}" target="_blank" rel="noopener noreferrer" style="cursor:pointer;"><i class="fas {i}"></i><div>| {l} |</div></a>'
+            # no more postModal tile logic needed
+            return f'<a class="tile" onclick="window.location.hash=\'{h[1:]}\'" style="cursor:pointer;"><i class="fas {i}"></i><div>| {l} |</div></a>'
+        return f'<a class="tile" href="{h}" target="_blank" rel="noopener noreferrer"><i class="fas {i}"></i><div>| {l} |</div></a>'
+
     tiles="".join(_tile(i,l,h) for i,l,h in NAV_ITEMS)
     _bdg=lambda i:f'<span id="{i}" style="display:none;background:var(--p);color:#000;border-radius:50%;padding:1px 5px;font-size:9px;margin-left:3px;"></span>'
-    _chat_tabs=f'<div class="tab-bar" style="border-left:2px solid var(--p);border-right:2px solid var(--p);"><button class="tab active" id="tabDM" onclick="switchTab(\'dm\')">DIRECT MSG {_bdg("badgeDM")}</button><button class="tab" id="tabGroup" onclick="switchTab(\'group\')">GROUP CHANNELS {_bdg("badgeGroup")}</button><button class="tab" id="tabPrivate" onclick="switchTab(\'private\')">&#128274; PRIVATE {_bdg("badgePrivate")}</button></div>'
+
+    # Board tab (posts)
+    _board_tab=f'''<div class="tab-content" id="tabContentBoard">
+      <div style="display:flex;flex-direction:column;height:100%;">
+        <div style="flex:1;overflow-y:auto;max-height:320px;background:rgba(0,0,0,.75);" id="postFeed">
+          <div style="padding:16px;opacity:.4;text-align:center;font-size:11px;">LOADING...</div>
+        </div>
+        <div id="postErr" class="error-msg" style="padding:0 12px;margin:0;"></div>
+        <div style="padding:9px 10px;border-top:2px solid var(--p);display:flex;gap:7px;align-items:flex-end;background:rgba(0,0,0,.9);">
+          <textarea id="postContent" placeholder="SHARE WITH THE COMMUNITY..." oninput="updatePostCount(this)"
+            style="flex:1;padding:9px 14px;background:rgba(0,0,0,.8);border:2px solid var(--p);border-radius:12px;color:var(--p);font-family:'Courier New',monospace;font-size:12px;text-transform:none;resize:none;height:38px;max-height:120px;overflow-y:auto;line-height:1.4;box-sizing:border-box;"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){{event.preventDefault();submitPost();}}"></textarea>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+            <span id="postCount" style="font-size:9px;opacity:.3;">0/500</span>
+            <button class="send-btn" onclick="submitPost()">&#9658;</button>
+          </div>
+        </div>
+      </div>
+    </div>'''
+
+    _chat_tabs=(f'<div class="tab-bar" style="border-left:2px solid var(--p);border-right:2px solid var(--p);">'
+        f'<button class="tab active" id="tabDM" onclick="switchTab(\'dm\')">DIRECT MSG {_bdg("badgeDM")}</button>'
+        f'<button class="tab" id="tabGroup" onclick="switchTab(\'group\')">CHANNELS {_bdg("badgeGroup")}</button>'
+        f'<button class="tab" id="tabPrivate" onclick="switchTab(\'private\')">&#128274; PRIVATE {_bdg("badgePrivate")}</button>'
+        f'<button class="tab" id="tabBoard" onclick="switchTab(\'board\')">&#9998; BOARD {_bdg("badgeBoard")}</button>'
+        f'</div>')
+
     _dm_tab='<div class="tab-content active" id="tabContentDM"><div class="comms-layout" style="border-top:none;"><div class="comms-sidebar" id="dmSidebar"><div class="comms-sidebar-header">CONVERSATIONS</div><div class="conv-list" id="dmConvList"><div style="padding:10px;font-size:11px;opacity:.4;">LOADING...</div></div><div class="sidebar-footer" style="position:relative;"><input class="field-plain" id="newDmUser" placeholder="&#128269; SEARCH USER..." type="text" style="margin:0;font-size:11px;padding:7px 10px;border-radius:20px;width:100%;box-sizing:border-box;" oninput="dmUserSearch()" onkeydown="if(event.key===\'Escape\')hideDmSuggest();" autocomplete="off"><div id="dmUserSuggest" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;right:0;background:#000;border:2px solid var(--p);border-radius:8px;box-shadow:0 0 20px var(--p30);z-index:9999;max-height:160px;overflow-y:auto;font-size:11px;"></div></div></div><div class="comms-main" id="dmMain"><div class="comms-thread-header"><button class="mobile-back-btn send-btn" style="padding:6px 12px;font-size:11px;margin-right:8px;display:none;" onclick="mobileShowSidebar(\'dm\')">&#9664; BACK</button><span id="dmThreadTitle" style="flex:1;">SELECT A CONVERSATION</span></div><div class="comms-messages" id="dmMessages"><div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">SELECT A CONVERSATION</div></div><div class="comms-compose" id="dmCompose" style="display:none;"><input type="text" id="dmInput" placeholder="MESSAGE..." onkeydown="if(event.key===\'Enter\')sendDM()"><button class="send-btn" onclick="sendDM()">&#9658;</button></div></div></div></div>'
-    _grp_tab='<div class="tab-content" id="tabContentGroup"><div class="comms-layout" style="border-top:none;"><div class="comms-sidebar" id="groupSidebar"><div class="comms-sidebar-header">CHANNELS</div><div class="conv-list" id="groupList"><div style="padding:10px;font-size:11px;opacity:.4;">LOADING...</div></div><div class="sidebar-footer" id="groupCreateFooter" style="display:none;"><input class="field-plain" id="newGroupName" placeholder="CHANNEL NAME" type="text" style="margin:0;font-size:11px;padding:7px;border-radius:20px;" onkeydown="if(event.key===\'Enter\')createGroup()"><button class="btn-action" style="margin-top:6px;padding:5px 8px;font-size:10px;width:100%;" onclick="createGroup()">+ CREATE</button></div></div><div class="comms-main" id="groupMain"><div class="comms-thread-header"><button class="mobile-back-btn send-btn" style="padding:6px 12px;font-size:11px;margin-right:8px;display:none;" onclick="mobileShowSidebar(\'group\')">&#9664; BACK</button><span id="groupThreadTitle" style="flex:1;">SELECT A CHANNEL</span><button class="send-btn" id="joinLeaveBtn" style="display:none;font-size:10px;padding:5px 12px;"></button></div><div class="comms-messages" id="groupMessages"><div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">SELECT A CHANNEL</div></div><div class="comms-compose" id="groupCompose" style="display:none;"><input type="text" id="groupInput" placeholder="BROADCAST..." onkeydown="if(event.key===\'Enter\')sendGroupMsg()"><button class="send-btn" onclick="sendGroupMsg()">&#9658;</button></div></div></div></div>'
+
+    _grp_footer=(f'<div class="sidebar-footer" id="groupCreateFooter" style="display:{"block" if admin else "none"};">'
+        f'<input class="field-plain" id="newGroupName" placeholder="CHANNEL NAME" type="text" style="margin:0;font-size:11px;padding:7px;border-radius:20px;" onkeydown="if(event.key===\'Enter\')createGroup()">'
+        f'<button class="btn-action" style="margin-top:6px;padding:5px 8px;font-size:10px;width:100%;" onclick="createGroup()">+ CREATE</button></div>')
+    _grp_tab=f'<div class="tab-content" id="tabContentGroup"><div class="comms-layout" style="border-top:none;"><div class="comms-sidebar" id="groupSidebar"><div class="comms-sidebar-header">CHANNELS</div><div class="conv-list" id="groupList"><div style="padding:10px;font-size:11px;opacity:.4;">LOADING...</div></div>{_grp_footer}</div><div class="comms-main" id="groupMain"><div class="comms-thread-header"><button class="mobile-back-btn send-btn" style="padding:6px 12px;font-size:11px;margin-right:8px;display:none;" onclick="mobileShowSidebar(\'group\')">&#9664; BACK</button><span id="groupThreadTitle" style="flex:1;">SELECT A CHANNEL</span><button class="send-btn" id="joinLeaveBtn" style="display:none;font-size:10px;padding:5px 12px;"></button></div><div class="comms-messages" id="groupMessages"><div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">SELECT A CHANNEL</div></div><div class="comms-compose" id="groupCompose" style="display:none;"><input type="text" id="groupInput" placeholder="BROADCAST..." onkeydown="if(event.key===\'Enter\')sendGroupMsg()"><button class="send-btn" onclick="sendGroupMsg()">&#9658;</button></div></div></div></div>'
+
     _prv_tab='<div class="tab-content" id="tabContentPrivate"><div class="comms-layout" style="border-top:none;"><div class="comms-sidebar" id="privateSidebar"><div class="comms-sidebar-header">PRIVATE ROOMS</div><div class="conv-list" id="privateRoomList"><div style="padding:10px;font-size:11px;opacity:.4;">LOADING...</div></div><div class="sidebar-footer" id="privateAdminFooter" style="display:none;"><input class="field-plain" id="newRoomName" placeholder="ROOM NAME" type="text" style="margin:0;font-size:11px;padding:7px;border-radius:20px;" onkeydown="if(event.key===\'Enter\')createPrivateRoom()"><button class="btn-action" style="margin-top:6px;padding:5px 8px;font-size:10px;width:100%;" onclick="createPrivateRoom()">+ CREATE ROOM</button></div></div><div class="comms-main" id="privateMain"><div class="comms-thread-header"><button class="mobile-back-btn send-btn" style="padding:6px 12px;font-size:11px;margin-right:8px;display:none;" onclick="mobileShowSidebar(\'private\')">&#9664; BACK</button><span id="privateRoomTitle" style="flex:1;">SELECT A ROOM</span><button id="privateMembersBtn" style="display:none;background:none;border:1px solid var(--p);border-radius:6px;color:var(--p);cursor:pointer;font-size:10px;padding:3px 10px;font-family:\'Courier New\',monospace;" onclick="showPrivateMembers()">&#128100; MEMBERS</button></div><div class="comms-messages" id="privateMessages"><div style="opacity:.3;text-align:center;margin:auto;font-size:12px;">SELECT A ROOM</div></div><div class="comms-compose" id="privateCompose" style="display:none;"><input type="text" id="privateInput" placeholder="MESSAGE..." onkeydown="if(event.key===\'Enter\')sendPrivateMsg()"><button class="send-btn" onclick="sendPrivateMsg()">&#9658;</button></div></div></div></div>'
+
     _chat_title_right='<span style="font-size:10px;opacity:.7;letter-spacing:1px;">[SYSTEM STATUS] [ACTIVE] &mdash; THE VOICE OF THE PEOPLE.</span><span style="font-size:9px;opacity:.4;">&#11041; FERNET-256 E2E ENCRYPTED &middot; AUTO-REFRESH 5s</span>'
-    chat_panel=cyber_box("// CHAT //",_dm_tab+_grp_tab+_prv_tab,title_right=_chat_title_right,extra_header=_chat_tabs,body_style="border-top:none;",border_top=False) if user else ""
+    chat_panel=cyber_box("// CHAT //",_dm_tab+_grp_tab+_prv_tab+_board_tab,title_right=_chat_title_right,extra_header=_chat_tabs,body_style="border-top:none;",border_top=False) if user else ""
+
     search_bar='<div class="search-box" style="width:100%;margin:0 0 24px;"><div class="search-row"><input class="search-input" id="homeSearchInput" placeholder="&#128270; GOOGLE SEARCH..." type="text" onkeydown="if(event.key===\'Enter\')homeRunSearch()"><button class="search-btn" onclick="homeRunSearch()">&#128270; SEARCH</button></div></div>' if user else ""
+
     install_banner=('<div id="installBanner" style="display:block;width:100%;margin:0 0 16px;box-sizing:border-box;"><div style="border:2px solid var(--p);border-radius:var(--r);padding:10px 16px;background:var(--p10);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;"><span style="font-size:11px;letter-spacing:1px;">&#128242; INSTALL VOX APP &mdash; ACCESS FROM YOUR HOME SCREEN</span><button id="enableNotifBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="enableNotifications()">&#128276; ENABLE NOTIFICATIONS</button><div style="display:flex;gap:8px;align-items:center;"><button id="installBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="triggerInstall()">&#11015; INSTALL</button><button onclick="document.getElementById(\'installBanner\').style.display=\'none\';localStorage.setItem(\'voxInstallDismissed\',\'1\')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:14px;padding:2px 6px;">&#10006;</button></div></div><div id="iosInstallMsg" style="display:none;border:1px solid var(--p30);border-top:none;border-radius:0 0 var(--r) var(--r);padding:8px 16px;font-size:10px;opacity:.7;letter-spacing:1px;">&#63743; ON IOS: TAP THE SHARE BUTTON THEN &ldquo;ADD TO HOME SCREEN&rdquo;</div></div>'
         '<script>let _installPrompt=null;window.addEventListener(\'beforeinstallprompt\',e=>{e.preventDefault();_installPrompt=e;if(!localStorage.getItem(\'voxInstallDismissed\')){const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'block\';}});window.addEventListener(\'appinstalled\',()=>{const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'none\';localStorage.setItem(\'voxInstallDismissed\',\'1\');});if(typeof Notification!==\'undefined\'&&Notification.permission!==\'granted\'&&Notification.permission!==\'denied\'){const btn=document.getElementById(\'enableNotifBtn\');if(btn)btn.style.display=\'inline-block\';}if(typeof Notification!==\'undefined\'&&Notification.permission===\'granted\'){const m=document.getElementById(\'notifMenuItem\');if(m)m.style.display=\'none\';}function triggerInstall(){if(_installPrompt){_installPrompt.prompt();_installPrompt.userChoice.then(r=>{if(r.outcome===\'accepted\')localStorage.setItem(\'voxInstallDismissed\',\'1\');_installPrompt=null;});}}const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;const isStandalone=window.navigator.standalone===true||window.matchMedia(\'(display-mode: standalone)\').matches;if(!isStandalone&&!localStorage.getItem(\'voxInstallDismissed\')){const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'block\';}if(isIOS&&!isStandalone&&!localStorage.getItem(\'voxInstallDismissed\')){const b=document.getElementById(\'installBanner\');const ios=document.getElementById(\'iosInstallMsg\');const btn=document.getElementById(\'installBtn\');if(b)b.style.display=\'block\';if(ios)ios.style.display=\'block\';if(btn)btn.style.display=\'none\';}</script>') if user else ""
+
     _news_tabs='<div style="display:flex;border-left:2px solid var(--p);border-right:2px solid var(--p);"><button id="newsTabWorld" onclick="switchNewsTab(\'world\')" style="flex:1;padding:6px 2px;background:var(--p);color:#000;border:none;border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127760; WORLD</button><button id="newsTabUS" onclick="switchNewsTab(\'usnews\')" style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127482;&#127480; US NEWS</button><button id="newsTabEpstein" onclick="switchNewsTab(\'epstein\')" style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#128269; EPSTEIN</button></div>'
-    _news_body='<div id="newsFeed" style="padding:16px;opacity:.4;text-align:center;font-size:11px;">&#128256; FETCHING NEWS...</div>'
-    _news_title_right='<span id="newsFeedStatus" style="font-size:9px;opacity:.4;letter-spacing:1px;">LOADING...</span>'
-    news_panel=cyber_box("// LIVE NEWS //",_news_body,title_right=_news_title_right,extra_header=_news_tabs,max_h="320px",border_top=False) if user else ""
-    content=(f'<div class="command-wrapper"><div style="text-align:center;width:100%;"><div class="tile-grid">{tiles}</div></div>{install_banner}{search_bar}{chat_panel}{news_panel}<div class="content-box">The system is broken! We rely on big corporations to supply us — that\'s why they can inflate prices!<br><br>We build the future we want to live in by growing our own food and bartering. Buy local, sell local!</div><div class="content-box">If you have landed here, you are wondering if there is a different way to live. We will show you exactly how, step by step.</div><div class="three-column-grid"><div class="column"><h3>THE TRUTH</h3><p>Wealth gap and corporate reliance truth.</p><a class="btn-action" href="https://www.youtube.com/watch?v=pb0OCI9qwIU" target="_blank" rel="noopener noreferrer">&#9658; WATCH</a></div><div class="column"><h3>ORGANIZE</h3><p>Grow food, barter, and rebuild community.</p><a class="btn-action" href="https://www.youtube.com/watch?v=shIfzNOcNvs" target="_blank" rel="noopener noreferrer">&#9658; LEARN</a></div><div class="column"><h3>COMMUNITY</h3><p>Join our TikTok community and say hello!</p><a class="btn-action" href="#" target="_blank" rel="noopener noreferrer">&#9658; ACCESS</a></div></div></div>')
+    news_panel=cyber_box("// LIVE NEWS //",'<div id="newsFeed" style="padding:16px;opacity:.4;text-align:center;font-size:11px;">&#128256; FETCHING NEWS...</div>',title_right='<span id="newsFeedStatus" style="font-size:9px;opacity:.4;letter-spacing:1px;">LOADING...</span>',extra_header=_news_tabs,max_h="320px",border_top=False) if user else ""
+
+    content=(f'<div class="command-wrapper"><div style="text-align:center;width:100%;"><div class="tile-grid">{tiles}</div></div>{install_banner}{search_bar}{chat_panel}{news_panel}'
+        f'<div class="content-box">The system is broken! We rely on big corporations to supply us — that\'s why they can inflate prices!<br><br>We build the future we want to live in by growing our own food and bartering. Buy local, sell local!</div>'
+        f'<div class="content-box">If you have landed here, you are wondering if there is a different way to live. We will show you exactly how, step by step.</div>'
+        f'<div class="three-column-grid"><div class="column"><h3>THE TRUTH</h3><p>Wealth gap and corporate reliance truth.</p><a class="btn-action" href="https://www.youtube.com/watch?v=pb0OCI9qwIU" target="_blank" rel="noopener noreferrer">&#9658; WATCH</a></div><div class="column"><h3>ORGANIZE</h3><p>Grow food, barter, and rebuild community.</p><a class="btn-action" href="https://www.youtube.com/watch?v=shIfzNOcNvs" target="_blank" rel="noopener noreferrer">&#9658; LEARN</a></div><div class="column"><h3>COMMUNITY</h3><p>Join our TikTok community and say hello!</p><a class="btn-action" href="#" target="_blank" rel="noopener noreferrer">&#9658; ACCESS</a></div></div></div>')
+
     return shell(content,user=user,theme=theme)
+
+# ── Auth routes ──
 @app.route("/api/register",methods=["POST"])
 def api_register():
     d=request.json
@@ -605,6 +658,7 @@ def api_register():
         return ok()
     except psycopg2.errors.UniqueViolation: return err("USERNAME TAKEN")
     except Exception as e: return err(str(e))
+
 @app.route("/api/login",methods=["POST"])
 def api_login():
     d=request.json
@@ -621,17 +675,19 @@ def api_login():
                 cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,u))
     session["username"]=u;session["theme"]=row[1];session.permanent=True
     return ok()
+
 @app.route("/logout")
 def logout():
     session.clear();return redirect("/")
+
 @app.route("/api/theme",methods=["POST"])
 def api_theme():
     if e:=require_login(): return e
     t=request.json.get("theme","green")
     if t not in THEMES: return err("INVALID THEME")
-    with db() as con:
-        con.cursor().execute("UPDATE users SET theme=%s WHERE username=%s",(t,me()))
+    with db() as con: con.cursor().execute("UPDATE users SET theme=%s WHERE username=%s",(t,me()))
     session["theme"]=t;return ok()
+
 @app.route("/api/change-password",methods=["POST"])
 def api_change_password():
     if e:=require_login(): return e
@@ -646,6 +702,7 @@ def api_change_password():
         if not row or row[0]!=hash_pw(cur_pw): return err("CURRENT PASSWORD INCORRECT")
         cur.execute("UPDATE users SET password_hash=%s WHERE username=%s",(hash_pw(new_pw),me()))
     return ok()
+
 @app.route("/api/users/search")
 def api_user_search():
     q=request.args.get("q","").strip()
@@ -653,8 +710,9 @@ def api_user_search():
     with db() as con:
         cur=con.cursor()
         cur.execute("SELECT username FROM users WHERE username LIKE %s LIMIT 10",(f"%{q}%",))
-        rows=cur.fetchall()
-    return ok(users=[r[0] for r in rows])
+    return ok(users=[r[0] for r in cur.fetchall()])
+
+# ── Posts ──
 @app.route("/api/posts")
 def api_posts():
     if e:=require_login(): return e
@@ -672,15 +730,16 @@ def api_posts():
         if rxu==u: rx[pid][emoji]["mine"]=True
     posts=[{"id":r[0],"username":r[1],"content":r[2],"created_at":str(r[3])[:16],"reactions":rx.get(r[0],{}),"can_delete":is_admin(u) or r[1]==u} for r in rows]
     return ok(posts=posts,me=u)
+
 @app.route("/api/posts/create",methods=["POST"])
 def api_posts_create():
     if e:=require_login(): return e
     content=(request.json or {}).get("content","").strip()
     if not content: return err("EMPTY POST")
     if len(content)>500: return err("TOO LONG")
-    with db() as con:
-        con.cursor().execute("INSERT INTO posts(username,content) VALUES(%s,%s)",(me(),content))
+    with db() as con: con.cursor().execute("INSERT INTO posts(username,content) VALUES(%s,%s)",(me(),content))
     return ok()
+
 @app.route("/api/posts/react",methods=["POST"])
 def api_posts_react():
     if e:=require_login(): return e
@@ -695,9 +754,9 @@ def api_posts_react():
         if existing:
             if existing[0]==emoji: cur.execute("DELETE FROM post_reactions WHERE post_id=%s AND username=%s",(post_id,u))
             else: cur.execute("UPDATE post_reactions SET emoji=%s WHERE post_id=%s AND username=%s",(emoji,post_id,u))
-        else:
-            cur.execute("INSERT INTO post_reactions(post_id,username,emoji) VALUES(%s,%s,%s)",(post_id,u,emoji))
+        else: cur.execute("INSERT INTO post_reactions(post_id,username,emoji) VALUES(%s,%s,%s)",(post_id,u,emoji))
     return ok()
+
 @app.route("/api/posts/delete",methods=["POST"])
 def api_posts_delete():
     if e:=require_login(): return e
@@ -712,6 +771,8 @@ def api_posts_delete():
         cur.execute("DELETE FROM post_reactions WHERE post_id=%s",(post_id,))
         cur.execute("DELETE FROM posts WHERE id=%s",(post_id,))
     return ok()
+
+# ── Admin ──
 @app.route("/api/admin/users")
 def api_admin_users():
     if e:=require_admin(): return e
@@ -720,15 +781,15 @@ def api_admin_users():
         cur.execute("SELECT username,is_admin,created_at FROM users ORDER BY is_admin DESC,created_at ASC")
         rows=cur.fetchall()
     return ok(users=[{"username":r[0],"is_admin":bool(r[1]),"created_at":str(r[2])} for r in rows])
+
 @app.route("/api/admin/set-admin",methods=["POST"])
 def api_admin_set():
     if e:=require_admin(): return e
-    d=request.json
-    target,grant=d.get("username",""),d.get("grant",False)
+    d=request.json;target,grant=d.get("username",""),d.get("grant",False)
     if target==ADMIN_USER: return err("CANNOT MODIFY ROOT ADMIN")
-    with db() as con:
-        con.cursor().execute("UPDATE users SET is_admin=%s WHERE username=%s",(1 if grant else 0,target))
+    with db() as con: con.cursor().execute("UPDATE users SET is_admin=%s WHERE username=%s",(1 if grant else 0,target))
     return ok()
+
 @app.route("/api/admin/remove-user",methods=["POST"])
 def api_admin_remove_user():
     if e:=require_admin(): return e
@@ -736,11 +797,11 @@ def api_admin_remove_user():
     if target==ADMIN_USER: return err("CANNOT REMOVE ROOT ADMIN")
     with db() as con:
         cur=con.cursor()
-        cur.execute("DELETE FROM messages WHERE sender=%s OR recipient=%s",(target,target))
-        cur.execute("DELETE FROM group_messages WHERE sender=%s",(target,))
-        cur.execute("DELETE FROM group_members WHERE username=%s",(target,))
+        for tbl,col in [("messages","sender"),("messages","recipient"),("group_messages","sender"),("group_members","username")]:
+            cur.execute(f"DELETE FROM {tbl} WHERE {col}=%s",(target,))
         cur.execute("DELETE FROM users WHERE username=%s",(target,))
     return ok()
+
 @app.route("/api/admin/dm-log")
 def api_admin_dm_log():
     if e:=require_admin(): return e
@@ -749,12 +810,13 @@ def api_admin_dm_log():
         cur.execute("SELECT id,sender,recipient,content_enc,timestamp FROM messages ORDER BY timestamp DESC LIMIT 200")
         rows=cur.fetchall()
     return ok(messages=[{"id":r[0],"sender":r[1],"recipient":r[2],"content":dec(r[3]),"timestamp":str(r[4])} for r in rows])
+
 @app.route("/api/admin/delete-dm",methods=["POST"])
 def api_admin_delete_dm():
     if e:=require_admin(): return e
-    with db() as con:
-        con.cursor().execute("DELETE FROM messages WHERE id=%s",(request.json.get("id"),))
+    with db() as con: con.cursor().execute("DELETE FROM messages WHERE id=%s",(request.json.get("id"),))
     return ok()
+
 @app.route("/api/admin/group-log")
 def api_admin_group_log():
     if e:=require_admin(): return e
@@ -763,6 +825,7 @@ def api_admin_group_log():
         cur.execute("SELECT gm.id,g.id,g.name,gm.sender,gm.content_enc,gm.timestamp FROM group_messages gm JOIN groups g ON g.id=gm.group_id ORDER BY gm.timestamp DESC LIMIT 200")
         rows=cur.fetchall()
     return ok(messages=[{"id":r[0],"group_id":r[1],"group":r[2],"sender":r[3],"content":dec(r[4]),"timestamp":str(r[5])} for r in rows])
+
 @app.route("/api/admin/user-chat")
 def api_admin_user_chat():
     if e:=require_admin(): return e
@@ -780,6 +843,7 @@ def api_admin_user_chat():
         convos.setdefault(p,[]).append({"id":r[0],"sender":r[1],"recipient":r[2],"content":dec(r[3]),"timestamp":str(r[4])})
     result=[{"partner":p,"messages":m} for p,m in convos.items()]
     return ok(username=username,conversations=result,total=sum(len(c["messages"]) for c in result))
+
 @app.route("/api/admin/delete-convo",methods=["POST"])
 def api_admin_delete_convo():
     if e:=require_admin(): return e
@@ -788,6 +852,7 @@ def api_admin_delete_convo():
     with db() as con:
         con.cursor().execute("DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)",(u1,u2,u2,u1))
     return ok()
+
 @app.route("/api/admin/delete-channel",methods=["POST"])
 def api_admin_delete_channel():
     if e:=require_admin(): return e
@@ -797,33 +862,33 @@ def api_admin_delete_channel():
         cur=con.cursor()
         cur.execute("DELETE FROM group_messages WHERE group_id=%s",(gid,))
         cur.execute("DELETE FROM group_members WHERE group_id=%s",(gid,))
+        cur.execute("DELETE FROM group_banned WHERE group_id=%s",(gid,))
         cur.execute("DELETE FROM groups WHERE id=%s",(gid,))
     return ok()
+
 @app.route("/api/admin/delete-group-msg",methods=["POST"])
 def api_admin_delete_group_msg():
     if e:=require_admin(): return e
-    with db() as con:
-        con.cursor().execute("DELETE FROM group_messages WHERE id=%s",(request.json.get("id"),))
+    with db() as con: con.cursor().execute("DELETE FROM group_messages WHERE id=%s",(request.json.get("id"),))
     return ok()
+
 @app.route("/api/admin/lock-channel",methods=["POST"])
 def api_admin_lock_channel():
     if e:=require_admin(): return e
     d=request.json
-    with db() as con:
-        con.cursor().execute("UPDATE groups SET locked=%s WHERE id=%s",(1 if d.get("lock") else 0,d.get("group_id")))
+    with db() as con: con.cursor().execute("UPDATE groups SET locked=%s WHERE id=%s",(1 if d.get("lock") else 0,d.get("group_id")))
     return ok()
+
 @app.route("/api/admin/traffic")
 def api_admin_traffic():
     if e:=require_admin(): return e
     with db() as con:
         cur=con.cursor()
-        cur.execute("SELECT date,COUNT(*) FROM visits GROUP BY date ORDER BY date DESC LIMIT 30")
-        rows=cur.fetchall()
-        cur.execute("SELECT COUNT(DISTINCT ip) FROM visits")
-        total=cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM visits WHERE date=CURRENT_DATE::text")
-        today=cur.fetchone()[0]
+        cur.execute("SELECT date,COUNT(*) FROM visits GROUP BY date ORDER BY date DESC LIMIT 30"); rows=cur.fetchall()
+        cur.execute("SELECT COUNT(DISTINCT ip) FROM visits"); total=cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM visits WHERE date=CURRENT_DATE::text"); today=cur.fetchone()[0]
     return ok(days=[{"date":r[0],"visitors":r[1]} for r in rows],total=total,today=today)
+
 @app.route("/api/admin/reset-requests")
 def api_admin_reset_requests():
     if e:=require_admin(): return e
@@ -832,11 +897,11 @@ def api_admin_reset_requests():
         cur.execute("SELECT id,username,temp_password,status,requested_at FROM password_resets WHERE status='pending' ORDER BY requested_at DESC")
         rows=cur.fetchall()
     return ok(requests=[{"id":r[0],"username":r[1],"temp_password":r[2],"status":r[3],"requested_at":str(r[4])} for r in rows])
+
 @app.route("/api/admin/reset-approve",methods=["POST"])
 def api_admin_reset_approve():
     if e:=require_admin(): return e
-    d=request.json or {}
-    rid,temp_pw=d.get("id"),d.get("temp_password","").strip()
+    d=request.json or {};rid,temp_pw=d.get("id"),d.get("temp_password","").strip()
     if not rid or not temp_pw: return err("MISSING FIELDS")
     if len(temp_pw)<4: return err("TEMP PASSWORD TOO SHORT")
     with db() as con:
@@ -847,14 +912,16 @@ def api_admin_reset_approve():
         cur.execute("UPDATE users SET password_hash=%s WHERE username=%s",(hash_pw(temp_pw),row[0]))
         cur.execute("UPDATE password_resets SET status='approved',temp_password=%s WHERE id=%s",(temp_pw,rid))
     return ok()
+
 @app.route("/api/admin/reset-deny",methods=["POST"])
 def api_admin_reset_deny():
     if e:=require_admin(): return e
     rid=(request.json or {}).get("id")
     if not rid: return err("MISSING ID")
-    with db() as con:
-        con.cursor().execute("UPDATE password_resets SET status='denied' WHERE id=%s",(rid,))
+    with db() as con: con.cursor().execute("UPDATE password_resets SET status='denied' WHERE id=%s",(rid,))
     return ok()
+
+# ── Traffic / Online ──
 @app.route("/api/traffic/public")
 def api_traffic_public():
     ip,now=get_ip(),utc_now()
@@ -865,18 +932,14 @@ def api_traffic_public():
         cur.execute("INSERT INTO visits(date,ip) VALUES(%s,%s) ON CONFLICT DO NOTHING",(datetime.date.today().isoformat(),ip))
         cur.execute("INSERT INTO active_users(ip,last_seen) VALUES(%s,%s) ON CONFLICT (ip) DO UPDATE SET last_seen=EXCLUDED.last_seen",(ip,now))
         cur.execute("DELETE FROM active_users WHERE last_seen < %s",(cutoff,))
-        if u:
-            cur.execute("INSERT INTO user_sessions(username,last_seen) VALUES(%s,%s) ON CONFLICT (username) DO UPDATE SET last_seen=EXCLUDED.last_seen",(u,now))
+        if u: cur.execute("INSERT INTO user_sessions(username,last_seen) VALUES(%s,%s) ON CONFLICT (username) DO UPDATE SET last_seen=EXCLUDED.last_seen",(u,now))
         cur.execute("DELETE FROM user_sessions WHERE last_seen < %s",(cutoff,))
-        cur.execute("SELECT COUNT(*) FROM visits WHERE date=CURRENT_DATE::text")
-        today=cur.fetchone()[0]
-        cur.execute("SELECT COUNT(DISTINCT ip) FROM visits")
-        total=cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM active_users")
-        online=cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM users")
-        members=cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM visits WHERE date=CURRENT_DATE::text"); today=cur.fetchone()[0]
+        cur.execute("SELECT COUNT(DISTINCT ip) FROM visits"); total=cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM active_users"); online=cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM users"); members=cur.fetchone()[0]
     return ok(today=today,total=total,online=online,members=members)
+
 @app.route("/api/online")
 def api_online():
     if not logged_in(): return ok(online=[])
@@ -884,43 +947,23 @@ def api_online():
     with db() as con:
         cur=con.cursor()
         cur.execute("SELECT username FROM user_sessions WHERE last_seen >= %s",(cutoff,))
-        rows=cur.fetchall()
-    return ok(online=[r[0] for r in rows])
+    return ok(online=[r[0] for r in cur.fetchall()])
+
+# ── News ──
 @app.route("/api/news")
 def api_news():
     if e:=require_login(): return e
     import random
     feed_type=request.args.get("type","world")
     FEEDS={
-        "world":[
-            ("https://news.google.com/rss/headlines/section/topic/WORLD","WORLD"),
-            ("https://news.google.com/rss/headlines/section/topic/NATION","NATION"),
-            ("https://news.google.com/rss/headlines/section/topic/BUSINESS","BUSINESS"),
-            ("https://news.google.com/rss/headlines/section/topic/HEALTH","HEALTH"),
-            ("https://news.google.com/rss/headlines/section/topic/SCIENCE","SCIENCE"),
-            ("https://news.google.com/rss/headlines/section/topic/TECHNOLOGY","TECH"),
-        ],
-        "usnews":[
-            ("https://news.google.com/rss/headlines/section/geo/US","US"),
-            ("https://news.google.com/rss/search?q=united+states+news","US NEWS"),
-            ("https://news.google.com/rss/search?q=US+politics+government","POLITICS"),
-            ("https://news.google.com/rss/search?q=US+economy+inflation","ECONOMY"),
-            ("https://news.google.com/rss/search?q=US+border+immigration","BORDER"),
-            ("https://news.google.com/rss/search?q=US+military+defense","MILITARY"),
-        ],
-        "epstein":[
-            ("https://news.google.com/rss/search?q=epstein+files+documents","FILES"),
-            ("https://news.google.com/rss/search?q=jeffrey+epstein+court","COURT"),
-            ("https://news.google.com/rss/search?q=epstein+ghislaine+maxwell","MAXWELL"),
-            ("https://news.google.com/rss/search?q=epstein+client+list","CLIENTS"),
-            ("https://news.google.com/rss/search?q=epstein+island+investigation","INVESTIGATION"),
-            ("https://news.google.com/rss/search?q=epstein+jeffrey+news+2024","LATEST"),
-        ],
+        "world":[("https://news.google.com/rss/headlines/section/topic/WORLD","WORLD"),("https://news.google.com/rss/headlines/section/topic/NATION","NATION"),("https://news.google.com/rss/headlines/section/topic/BUSINESS","BUSINESS"),("https://news.google.com/rss/headlines/section/topic/HEALTH","HEALTH"),("https://news.google.com/rss/headlines/section/topic/SCIENCE","SCIENCE"),("https://news.google.com/rss/headlines/section/topic/TECHNOLOGY","TECH")],
+        "usnews":[("https://news.google.com/rss/headlines/section/geo/US","US"),("https://news.google.com/rss/search?q=united+states+news","US NEWS"),("https://news.google.com/rss/search?q=US+politics+government","POLITICS"),("https://news.google.com/rss/search?q=US+economy+inflation","ECONOMY"),("https://news.google.com/rss/search?q=US+border+immigration","BORDER"),("https://news.google.com/rss/search?q=US+military+defense","MILITARY")],
+        "epstein":[("https://news.google.com/rss/search?q=epstein+files+documents","FILES"),("https://news.google.com/rss/search?q=jeffrey+epstein+court","COURT"),("https://news.google.com/rss/search?q=epstein+ghislaine+maxwell","MAXWELL"),("https://news.google.com/rss/search?q=epstein+client+list","CLIENTS"),("https://news.google.com/rss/search?q=epstein+island+investigation","INVESTIGATION"),("https://news.google.com/rss/search?q=epstein+jeffrey+news+2024","LATEST")],
     }
     feeds=FEEDS.get(feed_type,FEEDS["world"])
-    UAS=["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15","Mozilla/5.0 (X11; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0"]
+    UAS=["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"]
     def fetch(url):
-        req=urllib.request.Request(url,headers={"User-Agent":random.choice(UAS),"Accept":"application/rss+xml,application/xml,text/xml,*/*","Accept-Encoding":"identity","Referer":"https://www.google.com/"})
+        req=urllib.request.Request(url,headers={"User-Agent":random.choice(UAS),"Accept":"application/rss+xml,application/xml,text/xml,*/*","Referer":"https://www.google.com/"})
         with urllib.request.urlopen(req,timeout=10) as r: return r.read().decode("utf-8",errors="replace")
     def tag(xml,t):
         m=re.search(r'<'+t+r'[^>]*>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</'+t+r'>',xml,re.DOTALL)
@@ -932,17 +975,18 @@ def api_news():
             xml=fetch(feed_url)
             blocks=re.findall(r'<item>(.*?)</item>',xml,re.DOTALL) or re.findall(r'<entry>(.*?)</entry>',xml,re.DOTALL)
             for item in blocks[:8]:
-                title=tag(item,'title')
-                url=""
+                title=tag(item,'title');url=""
                 for pat in [r'<link[^>]+href="([^"]+)"',r'<link[^>]*>(https?://[^<]+)</link>',r'<guid[^>]*>(https?://[^<]+)</guid>']:
                     m=re.search(pat,item)
                     if m: url=m.group(1).strip();break
                 if title and url and title not in seen:
                     seen.add(title)
-                    items.append({"title":title[:120],"url":url,"desc":tag(item,'description')[:200] or tag(item,'summary')[:200],"date":(tag(item,'pubDate') or tag(item,'published') or tag(item,'updated'))[:30],"cat":category})
+                    items.append({"title":title[:120],"url":url,"desc":tag(item,'description')[:200] or tag(item,'summary')[:200],"cat":category})
         except: continue
     random.shuffle(items)
     return ok(items=items[:40])
+
+# ── DMs ──
 @app.route("/api/dm/conversations")
 def api_dm_conversations():
     if not logged_in(): return jsonify({"ok":False})
@@ -955,9 +999,9 @@ def api_dm_conversations():
         convos=[]
         for (partner,_) in partners:
             cur.execute("SELECT COUNT(*) FROM messages WHERE sender=%s AND recipient=%s AND timestamp>%s",(partner,u,read_at.get(partner,'1970-01-01')))
-            cnt=cur.fetchone()[0]
-            convos.append({"username":partner,"unread":cnt})
+            convos.append({"username":partner,"unread":cur.fetchone()[0]})
     return ok(conversations=convos)
+
 @app.route("/api/dm/thread")
 def api_dm_thread():
     if not logged_in(): return jsonify({"ok":False})
@@ -969,6 +1013,7 @@ def api_dm_thread():
         rows=cur.fetchall()
         cur.execute("UPDATE messages SET read=1 WHERE recipient=%s AND sender=%s",(u,other))
     return ok(me=u,messages=dec_messages(rows))
+
 @app.route("/api/dm/send",methods=["POST"])
 def api_dm_send():
     if e:=require_login(): return e
@@ -985,6 +1030,7 @@ def api_dm_send():
         cur.execute("INSERT INTO messages(sender,recipient,content_enc) VALUES(%s,%s,%s)",(u,to,enc(content)))
     send_push(to,f"DM from {u}",content[:80],tag="dm")
     return ok()
+
 @app.route("/api/dm/delete",methods=["POST"])
 def api_dm_delete():
     if e:=require_login(): return e
@@ -994,6 +1040,7 @@ def api_dm_delete():
     with db() as con:
         con.cursor().execute("DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)",(u,other,other,u))
     return ok()
+
 @app.route("/api/dm/block",methods=["POST"])
 def api_dm_block():
     if e:=require_login(): return e
@@ -1005,31 +1052,31 @@ def api_dm_block():
         cur.execute("INSERT INTO dm_blocked(blocker,blocked) VALUES(%s,%s) ON CONFLICT DO NOTHING",(u,other))
         cur.execute("DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)",(u,other,other,u))
     return ok()
+
 @app.route("/api/dm/unblock",methods=["POST"])
 def api_dm_unblock():
     if e:=require_login(): return e
     other=(request.json or {}).get("username","").strip()
-    with db() as con:
-        con.cursor().execute("DELETE FROM dm_blocked WHERE blocker=%s AND blocked=%s",(me(),other))
+    with db() as con: con.cursor().execute("DELETE FROM dm_blocked WHERE blocker=%s AND blocked=%s",(me(),other))
     return ok()
+
+# ── Groups ──
 @app.route("/api/groups")
 def api_groups():
     if not logged_in(): return jsonify({"ok":False})
     u=me()
     with db() as con:
         cur=con.cursor()
-        cur.execute("SELECT id,name,locked FROM groups ORDER BY id ASC")
-        rows=cur.fetchall()
-        cur.execute("SELECT group_id FROM group_members WHERE username=%s",(u,))
-        members={r[0] for r in cur.fetchall()}
-        cur.execute("SELECT group_id FROM group_banned WHERE username=%s",(u,))
-        banned={r[0] for r in cur.fetchall()}
+        cur.execute("SELECT id,name,locked FROM groups ORDER BY id ASC"); rows=cur.fetchall()
+        cur.execute("SELECT group_id FROM group_members WHERE username=%s",(u,)); members={r[0] for r in cur.fetchall()}
+        cur.execute("SELECT group_id FROM group_banned WHERE username=%s",(u,)); banned={r[0] for r in cur.fetchall()}
         rat=read_at_map(con,u,'group')
         unread={r[0]:unread_count(con,'group_messages','group_id',r[0],u,rat.get(str(r[0]),'1970-01-01')) for r in rows}
     return ok(groups=[{"id":r[0],"name":r[1],"member":r[0] in members,"locked":bool(r[2]),"banned":r[0] in banned,"unread":unread.get(r[0],0)} for r in rows])
+
 @app.route("/api/groups/create",methods=["POST"])
 def api_group_create():
-    if e:=require_login(): return e
+    if e:=require_admin(): return e  # Admin-only
     name=request.json.get("name","").strip().upper()
     if not name or len(name)<2: return err("NAME TOO SHORT")
     try:
@@ -1042,34 +1089,29 @@ def api_group_create():
                 cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,uname))
         return ok(id=gid)
     except psycopg2.errors.UniqueViolation: return err("CHANNEL NAME TAKEN")
+
 @app.route("/api/groups/<int:gid>/messages")
 def api_group_messages(gid):
     if not logged_in(): return jsonify({"ok":False})
     u=me();admin=is_admin(u)
     with db() as con:
         cur=con.cursor()
-        cur.execute("SELECT 1 FROM group_banned WHERE group_id=%s AND username=%s",(gid,u))
-        banned=cur.fetchone()
-        cur.execute("SELECT 1 FROM group_members WHERE group_id=%s AND username=%s",(gid,u))
-        member=cur.fetchone()
+        cur.execute("SELECT 1 FROM group_banned WHERE group_id=%s AND username=%s",(gid,u)); banned=cur.fetchone()
+        cur.execute("SELECT 1 FROM group_members WHERE group_id=%s AND username=%s",(gid,u)); member=cur.fetchone()
         if not banned and not member:
-            cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,u))
-            member=True
-        cur.execute("SELECT locked FROM groups WHERE id=%s",(gid,))
-        group=cur.fetchone()
-        cur.execute("SELECT sender,content_enc,timestamp FROM group_messages WHERE group_id=%s ORDER BY timestamp ASC LIMIT 100",(gid,))
-        rows=cur.fetchall()
+            cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,u)); member=True
+        cur.execute("SELECT locked FROM groups WHERE id=%s",(gid,)); group=cur.fetchone()
+        cur.execute("SELECT sender,content_enc,timestamp FROM group_messages WHERE group_id=%s ORDER BY timestamp ASC LIMIT 100",(gid,)); rows=cur.fetchall()
         members_list=[]
         if admin:
-            cur.execute("SELECT username FROM group_members WHERE group_id=%s ORDER BY username",(gid,))
-            members_list=[r[0] for r in cur.fetchall()]
+            cur.execute("SELECT username FROM group_members WHERE group_id=%s ORDER BY username",(gid,)); members_list=[r[0] for r in cur.fetchall()]
     is_member=admin or (bool(member) and not bool(banned))
     return ok(me=u,member=is_member,locked=bool(group and group[0]),admin=admin,members=members_list,messages=dec_messages(rows))
+
 @app.route("/api/groups/send",methods=["POST"])
 def api_group_send():
     if e:=require_login(): return e
-    d=request.json
-    gid,content=d.get("group_id"),d.get("content","").strip()
+    d=request.json;gid,content=d.get("group_id"),d.get("content","").strip()
     if not content: return err("EMPTY MESSAGE")
     u=me()
     with db() as con:
@@ -1077,27 +1119,25 @@ def api_group_send():
         cur.execute("SELECT 1 FROM group_members WHERE group_id=%s AND username=%s",(gid,u))
         if not cur.fetchone(): return err("NOT A MEMBER")
         if not is_admin(u):
-            cur.execute("SELECT locked FROM groups WHERE id=%s",(gid,))
-            g=cur.fetchone()
+            cur.execute("SELECT locked FROM groups WHERE id=%s",(gid,)); g=cur.fetchone()
             if g and g[0]: return err("CHANNEL IS LOCKED")
         cur.execute("INSERT INTO group_messages(group_id,sender,content_enc) VALUES(%s,%s,%s)",(gid,u,enc(content)))
     with db() as con2:
         cur2=con2.cursor()
-        cur2.execute("SELECT name FROM groups WHERE id=%s",(gid,))
-        gname=cur2.fetchone()
-        cur2.execute("SELECT username FROM group_members WHERE group_id=%s AND username!=%s",(gid,u))
-        members=[r[0] for r in cur2.fetchall()]
+        cur2.execute("SELECT name FROM groups WHERE id=%s",(gid,)); gname=cur2.fetchone()
+        cur2.execute("SELECT username FROM group_members WHERE group_id=%s AND username!=%s",(gid,u)); members=[r[0] for r in cur2.fetchall()]
     gname=gname[0] if gname else "GROUP"
     for member in members: send_push(member,f"#{gname}",f"{u}: {content[:60]}",tag=f"group-{gid}")
     return ok()
+
 @app.route("/api/groups/kick",methods=["POST"])
 def api_group_kick():
     if e:=require_admin(): return e
     d=request.json;gid,target=d.get("group_id"),d.get("username","").strip()
     if not gid or not target: return err("MISSING FIELDS")
-    with db() as con:
-        con.cursor().execute("DELETE FROM group_members WHERE group_id=%s AND username=%s",(gid,target))
+    with db() as con: con.cursor().execute("DELETE FROM group_members WHERE group_id=%s AND username=%s",(gid,target))
     return ok()
+
 @app.route("/api/groups/ban",methods=["POST"])
 def api_group_ban():
     if e:=require_admin(): return e
@@ -1108,6 +1148,7 @@ def api_group_ban():
         cur.execute("DELETE FROM group_members WHERE group_id=%s AND username=%s",(gid,target))
         cur.execute("INSERT INTO group_banned(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,target))
     return ok()
+
 @app.route("/api/groups/unban",methods=["POST"])
 def api_group_unban():
     if e:=require_admin(): return e
@@ -1117,28 +1158,30 @@ def api_group_unban():
         cur.execute("DELETE FROM group_banned WHERE group_id=%s AND username=%s",(gid,target))
         cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,target))
     return ok()
+
 @app.route("/api/groups/join",methods=["POST"])
 def api_group_join():
     if not logged_in(): return jsonify({"ok":False})
-    with db() as con:
-        con.cursor().execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(request.json.get("group_id"),me()))
+    with db() as con: con.cursor().execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(request.json.get("group_id"),me()))
     return ok()
+
 @app.route("/api/groups/leave",methods=["POST"])
 def api_group_leave():
     if not logged_in(): return jsonify({"ok":False})
-    with db() as con:
-        con.cursor().execute("DELETE FROM group_members WHERE group_id=%s AND username=%s",(request.json.get("group_id"),me()))
+    with db() as con: con.cursor().execute("DELETE FROM group_members WHERE group_id=%s AND username=%s",(request.json.get("group_id"),me()))
     return ok()
+
 @app.route("/api/group/rename",methods=["POST"])
 def api_group_rename():
     if e:=require_admin(): return e
     d=request.json or {};gid,name=d.get("id"),d.get("name","").strip().upper()
     if not gid or not name: return err("MISSING FIELDS")
     try:
-        with db() as con:
-            con.cursor().execute("UPDATE groups SET name=%s WHERE id=%s",(name,gid))
+        with db() as con: con.cursor().execute("UPDATE groups SET name=%s WHERE id=%s",(name,gid))
         return ok()
     except: return err("NAME TAKEN")
+
+# ── Private rooms ──
 @app.route("/api/private/rooms")
 def api_private_rooms():
     if e:=require_login(): return e
@@ -1151,6 +1194,7 @@ def api_private_rooms():
         rat=read_at_map(con,u,'private')
         unread={r[0]:unread_count(con,'private_room_messages','room_id',r[0],u,rat.get(str(r[0]),'1970-01-01')) for r in rows}
     return ok(rooms=[{"id":r[0],"name":r[1],"unread":unread.get(r[0],0)} for r in rows],is_admin=admin)
+
 @app.route("/api/private/create",methods=["POST"])
 def api_private_create():
     if e:=require_admin(): return e
@@ -1162,6 +1206,7 @@ def api_private_create():
         rid=cur.fetchone()[0]
         cur.execute("INSERT INTO private_room_members(room_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(rid,me()))
     return ok(id=rid)
+
 @app.route("/api/private/<int:rid>/messages")
 def api_private_messages(rid):
     if e:=require_login(): return e
@@ -1174,6 +1219,7 @@ def api_private_messages(rid):
         cur.execute("SELECT sender,content_enc,timestamp FROM private_room_messages WHERE room_id=%s ORDER BY timestamp ASC LIMIT 100",(rid,))
         rows=cur.fetchall()
     return ok(me=u,is_admin=admin,messages=dec_messages(rows))
+
 @app.route("/api/private/send",methods=["POST"])
 def api_private_send():
     if e:=require_login(): return e
@@ -1188,21 +1234,20 @@ def api_private_send():
         cur.execute("INSERT INTO private_room_messages(room_id,sender,content_enc) VALUES(%s,%s,%s)",(rid,u,enc(content)))
     with db() as con2:
         cur2=con2.cursor()
-        cur2.execute("SELECT name FROM private_rooms WHERE id=%s",(rid,))
-        rname=cur2.fetchone()
-        cur2.execute("SELECT username FROM private_room_members WHERE room_id=%s AND username!=%s",(rid,u))
-        members=[r[0] for r in cur2.fetchall()]
+        cur2.execute("SELECT name FROM private_rooms WHERE id=%s",(rid,)); rname=cur2.fetchone()
+        cur2.execute("SELECT username FROM private_room_members WHERE room_id=%s AND username!=%s",(rid,u)); members=[r[0] for r in cur2.fetchall()]
     rname=rname[0] if rname else "PRIVATE"
     for member in members: send_push(member,f"🔒 {rname}",f"{u}: {content[:60]}",tag=f"private-{rid}")
     return ok()
+
 @app.route("/api/private/<int:rid>/members")
 def api_private_members(rid):
     if e:=require_admin(): return e
     with db() as con:
         cur=con.cursor()
         cur.execute("SELECT username FROM private_room_members WHERE room_id=%s ORDER BY username",(rid,))
-        rows=cur.fetchall()
-    return ok(members=[r[0] for r in rows])
+    return ok(members=[r[0] for r in cur.fetchall()])
+
 @app.route("/api/private/add-member",methods=["POST"])
 def api_private_add_member():
     if e:=require_admin(): return e
@@ -1214,22 +1259,24 @@ def api_private_add_member():
         if not cur.fetchone(): return err("USER NOT FOUND")
         cur.execute("INSERT INTO private_room_members(room_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(rid,username))
     return ok()
+
 @app.route("/api/private/remove-member",methods=["POST"])
 def api_private_remove_member():
     if e:=require_admin(): return e
     d=request.json or {};rid,username=d.get("room_id"),d.get("username","").strip()
     if not rid or not username: return err("MISSING FIELDS")
-    with db() as con:
-        con.cursor().execute("DELETE FROM private_room_members WHERE room_id=%s AND username=%s",(rid,username))
+    with db() as con: con.cursor().execute("DELETE FROM private_room_members WHERE room_id=%s AND username=%s",(rid,username))
     return ok()
+
 @app.route("/api/private/rename",methods=["POST"])
 def api_private_rename():
     if e:=require_admin(): return e
     d=request.json or {};rid,name=d.get("id"),d.get("name","").strip().upper()
     if not rid or not name: return err("MISSING FIELDS")
-    with db() as con:
-        con.cursor().execute("UPDATE private_rooms SET name=%s WHERE id=%s",(name,rid))
+    with db() as con: con.cursor().execute("UPDATE private_rooms SET name=%s WHERE id=%s",(name,rid))
     return ok()
+
+# ── Notifications / Mark read ──
 @app.route("/api/notifications")
 def api_notifications():
     if e:=require_login(): return e
@@ -1237,14 +1284,12 @@ def api_notifications():
     with db() as con:
         cur=con.cursor()
         read_dm_at=read_at_map(con,u,'dm')
-        cur.execute("SELECT DISTINCT sender FROM messages WHERE recipient=%s",(u,))
-        senders=[r[0] for r in cur.fetchall()]
+        cur.execute("SELECT DISTINCT sender FROM messages WHERE recipient=%s",(u,)); senders=[r[0] for r in cur.fetchall()]
         dm_unread=0
         for sender in senders:
             cur.execute("SELECT COUNT(*) FROM messages WHERE sender=%s AND recipient=%s AND timestamp>%s",(sender,u,read_dm_at.get(sender,'1970-01-01')))
             dm_unread+=cur.fetchone()[0]
-        cur.execute("SELECT id,name FROM groups WHERE id IN (SELECT group_id FROM group_members WHERE username=%s) ORDER BY id",(u,))
-        group_rows=cur.fetchall()
+        cur.execute("SELECT id,name FROM groups WHERE id IN (SELECT group_id FROM group_members WHERE username=%s) ORDER BY id",(u,)); group_rows=cur.fetchall()
         read_grp_at=read_at_map(con,u,'group')
         groups_unread={}
         for gid,gname in group_rows:
@@ -1258,13 +1303,12 @@ def api_notifications():
         for rid,rname in priv_rows:
             cnt=unread_count(con,'private_room_messages','room_id',rid,u,read_prv_at.get(str(rid),'1970-01-01'))
             if cnt: privrooms_unread[str(rid)]={"name":rname,"count":cnt}
-        cur.execute("SELECT read_at FROM chat_read_at WHERE username=%s AND chat_type='posts' AND chat_id='posts'",(u,))
-        posts_read=cur.fetchone()
-        cur.execute("SELECT COUNT(*) FROM posts WHERE username!=%s AND created_at>%s",(u,posts_read[0] if posts_read else '1970-01-01'))
-        new_posts=cur.fetchone()[0]
+        cur.execute("SELECT read_at FROM chat_read_at WHERE username=%s AND chat_type='posts' AND chat_id='posts'",(u,)); posts_read=cur.fetchone()
+        cur.execute("SELECT COUNT(*) FROM posts WHERE username!=%s AND created_at>%s",(u,posts_read[0] if posts_read else '1970-01-01')); new_posts=cur.fetchone()[0]
     group_total=sum(v["count"] for v in groups_unread.values())
     priv_total=sum(v["count"] for v in privrooms_unread.values())
     return ok(dm=dm_unread,groups=groups_unread,group=group_total,private_rooms=privrooms_unread,private=priv_total,posts=new_posts,total=dm_unread+group_total+priv_total+new_posts)
+
 @app.route("/api/mark-read",methods=["POST"])
 def api_mark_read():
     if e:=require_login(): return e
@@ -1275,9 +1319,10 @@ def api_mark_read():
     with db() as con:
         cur=con.cursor()
         cur.execute("INSERT INTO chat_read_at(username,chat_type,chat_id,read_at) VALUES(%s,%s,%s,%s) ON CONFLICT (username,chat_type,chat_id) DO UPDATE SET read_at=EXCLUDED.read_at",(me(),chat_type,chat_id,now))
-        if chat_type=="dm":
-            cur.execute("UPDATE messages SET read=1 WHERE recipient=%s AND sender=%s",(me(),chat_id))
+        if chat_type=="dm": cur.execute("UPDATE messages SET read=1 WHERE recipient=%s AND sender=%s",(me(),chat_id))
     return ok()
+
+# ── Password reset ──
 @app.route("/api/reset/request",methods=["POST"])
 def api_reset_request():
     username=(request.json or {}).get("username","").strip()
@@ -1290,9 +1335,12 @@ def api_reset_request():
         if cur.fetchone(): return ok()
         cur.execute("INSERT INTO password_resets(username) VALUES(%s)",(username,))
     return ok()
+
+# ── Push notifications ──
 @app.route("/api/push/vapid-public-key")
 def api_vapid_public_key():
     return ok(key=VAPID_PUBLIC_KEY)
+
 @app.route("/api/push/subscribe",methods=["POST"])
 def api_push_subscribe():
     if e:=require_login(): return e
@@ -1302,14 +1350,16 @@ def api_push_subscribe():
     with db() as con:
         con.cursor().execute("INSERT INTO push_subscriptions(username,endpoint,p256dh,auth) VALUES(%s,%s,%s,%s) ON CONFLICT (username,endpoint) DO UPDATE SET p256dh=EXCLUDED.p256dh,auth=EXCLUDED.auth",(me(),endpoint,p256dh,auth))
     return ok()
+
 @app.route("/api/push/unsubscribe",methods=["POST"])
 def api_push_unsubscribe():
     if e:=require_login(): return e
     endpoint=(request.json or {}).get("endpoint","")
     if endpoint:
-        with db() as con:
-            con.cursor().execute("DELETE FROM push_subscriptions WHERE username=%s AND endpoint=%s",(me(),endpoint))
+        with db() as con: con.cursor().execute("DELETE FROM push_subscriptions WHERE username=%s AND endpoint=%s",(me(),endpoint))
     return ok()
+
+# ── Gemini ask ──
 @app.route("/api/ask",methods=["POST"])
 def api_ask():
     if e:=require_login(): return e
@@ -1324,10 +1374,13 @@ def api_ask():
             data=_json.loads(resp.read().decode())
         return ok(answer=data["candidates"][0]["content"]["parts"][0]["text"].strip())
     except: return ok(answer="")
+
+# ── Static / PWA ──
 @app.route("/manifest.json")
 def manifest():
     data={"name":"Vox Populi","short_name":"VOX","description":"Vox Populi Community","start_url":"/","display":"standalone","background_color":"#000000","theme_color":"#00ff00","orientation":"portrait-primary","icons":[{"src":"/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},{"src":"/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}],"categories":["social","news"],"shortcuts":[{"name":"Chat","url":"/","description":"Open Vox community chat"}]}
     return Response(_json.dumps(data),mimetype="application/json")
+
 @app.route("/sw.js")
 def service_worker():
     sw="""const CACHE='vox-v1';
@@ -1337,6 +1390,7 @@ self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;if(e.reques
 self.addEventListener('push',e=>{let data={title:'VOX',body:'New notification',tag:'vox'};try{data=e.data.json();}catch(err){}e.waitUntil(self.registration.showNotification('VOX // '+data.title,{body:data.body,icon:'/icon-192.png',badge:'/icon-192.png',tag:data.tag,renotify:true,vibrate:[200,100,200],data:{url:'/'}}));});
 self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(self.location.origin)){c.focus();return;}}clients.openWindow('/');}));});"""
     return Response(sw,mimetype="application/javascript")
+
 def _svg_icon(size,text_y,font_size,sub_y=None,sub_text=None):
     txt=f'<text x="{size//2}" y="{text_y}" text-anchor="middle" font-family="monospace" font-weight="900" font-size="{font_size}" fill="#00ff00" letter-spacing="2">VOX</text>'
     sub=f'<text x="{size//2}" y="{sub_y}" text-anchor="middle" font-family="monospace" font-size="{font_size//4}" fill="#00ff00" opacity="0.6" letter-spacing="6">{sub_text}</text>' if sub_text else ''
@@ -1347,20 +1401,24 @@ def _svg_icon(size,text_y,font_size,sub_y=None,sub_text=None):
         return Response(cairosvg.svg2png(bytestring=svg,output_width=size,output_height=size),mimetype="image/png")
     except:
         return Response(svg,mimetype="image/svg+xml")
+
 @app.route("/icon-192.png")
 def icon_192(): return _svg_icon(192,108,34)
+
 @app.route("/icon-512.png")
 def icon_512(): return _svg_icon(512,285,90,sub_y=325,sub_text="VOX POPULI")
+
 @app.route("/reset-x7k9m2p4q8w3n6j1vb5")
 def emergency_reset():
     new_pw="Vox2024!"
-    with db() as con:
-        con.cursor().execute("UPDATE users SET password_hash=%s WHERE username=%s",(hash_pw(new_pw),ADMIN_USER))
+    with db() as con: con.cursor().execute("UPDATE users SET password_hash=%s WHERE username=%s",(hash_pw(new_pw),ADMIN_USER))
     return "<h1 style='font-family:monospace;background:#000;color:#0f0;padding:40px;'>DONE! Login: Eagleone / Vox2024! — CHANGE YOUR PASSWORD AFTER LOGGING IN.</h1>"
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     import traceback
     app.logger.error(traceback.format_exc())
     return f"<pre style='background:#111;color:#f44;padding:20px;font-size:12px;'>ERROR:\n{traceback.format_exc()}</pre>",500
+
 if __name__=="__main__":
     app.run(debug=False)
