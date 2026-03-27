@@ -1150,6 +1150,7 @@ def handle_exception(e):
 _SEC_TARGET   = os.environ.get("TARGET_URL","")          # site to scan (set in Railway vars)
 _SEC_MAX_PAGES= int(os.environ.get("SEC_MAX_PAGES","80"))
 _SEC_INTERVAL = int(os.environ.get("SEC_INTERVAL_MINS","60"))
+_SEC_COOKIE   = os.environ.get("SESSION_COOKIE","")      # logged-in session cookie to bypass login
 _SEC_STATE_FILE= str(_BASE/"sec_state.json")
 _SEC_REPORTS_FILE= str(_BASE/"sec_reports.json")
 _SEC_LOCK     = threading.Lock()
@@ -1169,6 +1170,11 @@ def _sec_load_state():
 def _sec_save_state(s):
     with open(_SEC_STATE_FILE,"w") as f: _json.dump(s,f)
 
+def _sec_headers():
+    h={"User-Agent":"VoxSecBot/1.0"}
+    if _SEC_COOKIE: h["Cookie"]=_SEC_COOKIE
+    return h
+
 def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
     visited,queue=[],[base_url];seen=set()
     domain=urllib.parse.urlparse(base_url).netloc
@@ -1177,7 +1183,7 @@ def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
         if url in seen: continue
         seen.add(url)
         try:
-            r=requests.get(url,timeout=8,headers={"User-Agent":"VoxSecBot/1.0"},allow_redirects=True)
+            r=requests.get(url,timeout=8,headers=_sec_headers(),allow_redirects=True)
             visited.append(url)
             soup=BeautifulSoup(r.text,"html.parser")
             for a in soup.find_all("a",href=True):
@@ -1201,7 +1207,7 @@ def _sec_broken_links(pages):
     broken=[]
     for url in pages:
         try:
-            r=requests.head(url,timeout=6,allow_redirects=True,headers={"User-Agent":"VoxSecBot/1.0"})
+            r=requests.head(url,timeout=6,allow_redirects=True,headers=_sec_headers())
             if r.status_code>=400: broken.append({"url":url,"status":r.status_code})
         except Exception as e: broken.append({"url":url,"status":"error","detail":str(e)})
     return broken
@@ -1210,7 +1216,7 @@ def _sec_content_changes(pages,state):
     changes=[];hashes=state.get("page_hashes",{})
     for url in pages:
         try:
-            r=requests.get(url,timeout=8,headers={"User-Agent":"VoxSecBot/1.0"})
+            r=requests.get(url,timeout=8,headers=_sec_headers())
             h=hashlib.sha256(r.text.encode()).hexdigest()
             if url in hashes and hashes[url]!=h:
                 changes.append({"url":url,"prev":hashes[url][:12],"new":h[:12]})
@@ -1223,7 +1229,7 @@ def _sec_harmful(pages):
     findings=[]
     for url in pages:
         try:
-            r=requests.get(url,timeout=8,headers={"User-Agent":"VoxSecBot/1.0"})
+            r=requests.get(url,timeout=8,headers=_sec_headers())
             text=r.text.lower()
             hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
             if hits: findings.append({"url":url,"keywords":hits})
