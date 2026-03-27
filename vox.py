@@ -6,6 +6,10 @@ from cryptography.fernet import Fernet
 # ── Security Scanner ──────────────────────────────────────────────────────────
 import ssl,socket,threading,urllib.parse
 try:
+    import requests as requests
+except ImportError:
+    requests=None
+try:
     from bs4 import BeautifulSoup
 except ImportError:
     BeautifulSoup=None
@@ -427,8 +431,8 @@ loadTrafficCounter();setInterval(loadTrafficCounter,10000);requestNotifPermissio
   if(!document.getElementById('_secAlertBar')){{
     const bar=document.createElement('div');
     bar.id='_secAlertBar';
-    bar.style.cssText='display:none;position:fixed;top:0;left:0;width:100%;z-index:99999;background:#cc0000;color:#fff;font-family:\'Courier New\',monospace;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;padding:10px 16px;box-sizing:border-box;display:none;align-items:center;justify-content:space-between;gap:12px;animation:tcPulse 1.5s infinite;';
-    bar.innerHTML='<span id="_secAlertMsg">&#9888; CRITICAL SECURITY ALERT</span><button onclick="window._secDismiss()" style="background:#fff;color:#cc0000;border:none;border-radius:6px;padding:5px 14px;font-family:\'Courier New\',monospace;font-size:11px;font-weight:bold;cursor:pointer;letter-spacing:1px;">&#10006; DISMISS</button>';
+    bar.style.cssText="display:none;position:fixed;top:0;left:0;width:100%;z-index:99999;background:#cc0000;color:#fff;font-family:'Courier New',monospace;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;padding:10px 16px;box-sizing:border-box;align-items:center;justify-content:space-between;gap:12px;animation:tcPulse 1.5s infinite;";
+    bar.innerHTML='<span id="_secAlertMsg">&#9888; CRITICAL SECURITY ALERT</span><button onclick="window._secDismiss()" style="background:#fff;color:#cc0000;border:none;border-radius:6px;padding:5px 14px;font-family:Courier New,monospace;font-size:11px;font-weight:bold;cursor:pointer;letter-spacing:1px;">&#10006; DISMISS</button>';
     document.body.prepend(bar);
   }}
   window._secDismiss=function(){{
@@ -1243,6 +1247,7 @@ def _sec_skip(url):
     return any(path.startswith(p) for p in _SEC_SKIP_PATHS)
 
 def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
+    if not requests: return []
     visited,queue=[],[base_url];seen=set()
     domain=urllib.parse.urlparse(base_url).netloc
     while queue and len(visited)<max_pages:
