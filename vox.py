@@ -283,8 +283,12 @@ def shell(content,user=None,theme="green",unread=0):
             f'<div class="dropdown-menu" id="accountMenu"><div class="dropdown-item" style="opacity:.5;font-size:10px;cursor:default;pointer-events:none;padding:8px 16px;">&#9658; {user.upper()} [{t["name"]}]</div>'
             f'<div class="dropdown-divider"></div><a class="dropdown-item" onclick="openModal(\'settingsModal\')"><i class="fas fa-cog"></i> SETTINGS</a>'
             f'<a class="dropdown-item" onclick="enableNotifications()" id="notifMenuItem"><i class="fas fa-bell"></i> ENABLE NOTIFICATIONS</a>'
-            f'<a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a></div></div>')
-        grid_style='grid-template-columns:auto 1fr auto';right_btns=''
+            f'<a class="dropdown-item" href="/security"><i class="fas fa-shield-alt"></i> SECURITY HUB</a><a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a></div></div>')
+        grid_style='grid-template-columns:auto 1fr auto'
+        right_btns=(
+            '<a href="/security" id="secNavBtn" title="SECURITY HUB" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 12px;color:var(--p);background:var(--p10);font-family:\'Courier New\',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;box-shadow:0 0 8px var(--p30);transition:.2s;" onmouseover="this.style.background=\'var(--p)\';this.style.color=\'#000\'" onmouseout="this.style.background=\'var(--p10)\';this.style.color=\'var(--p)\'">&#128737; SEC <span id="secStatusDot" style="width:9px;height:9px;border-radius:50%;background:#555;display:inline-block;margin-left:2px;transition:.4s;"></span></a>'
+            if admin else ''
+        )
     else:
         menu_html='';grid_style='grid-template-columns:1fr auto'
         right_btns=('<button class="hero-btn" onclick="openModal(\'loginModal\')">&#9658; LOGIN</button>'
@@ -397,6 +401,24 @@ async function removePrivateMember(u){{if(!confirm('REMOVE '+u+' FROM ROOM?'))re
 async function renameChat(type,id){{const current=type==='group'?activeGroupName:activePrivateRoomName;const newName=prompt('RENAME CHAT:',current);if(!newName||!newName.trim()||newName.trim().toUpperCase()===current)return;const d=await api('/api/'+type+'/rename',{{id,name:newName.trim().toUpperCase()}});if(!d.ok){{alert('ERROR: '+d.error);return;}}if(type==='group'){{activeGroupName=newName.trim().toUpperCase();loadGroupThread(id,activeGroupName,true);}}else{{activePrivateRoomName=newName.trim().toUpperCase();loadPrivateThread(id,activePrivateRoomName,true);}}}}
 function switchTab(tab){{['DM','Group','Private','Board'].forEach(t=>{{const tl=t.toLowerCase();const tabEl=$('tab'+t),contentEl=$('tabContent'+t);if(tabEl)tabEl.classList.toggle('active',tl===tab);if(contentEl){{contentEl.style.display=tl===tab?'block':'none';contentEl.classList.toggle('active',tl===tab);}}}});if(tab==='dm'){{loadDMConversations();setBadge('badgeDM',0);api('/api/mark-read',{{type:'dm',id:activeDMUser||''}});_prevNotif.dm=0;}}else if(tab==='group'){{loadGroups();}}else if(tab==='private'){{loadPrivateRooms();}}else if(tab==='board'){{loadPosts();markPostsRead();}}}}
 loadTrafficCounter();setInterval(loadTrafficCounter,10000);requestNotifPermission();checkNotifications();setInterval(checkNotifications,8000);loadOnlineUsers();setInterval(loadOnlineUsers,10000);
+(async function secNavPoll(){{
+  const dot=document.getElementById('secStatusDot');if(!dot)return;
+  async function updateDot(){{
+    try{{
+      const s=await fetch('/api/security/status').then(r=>r.json());
+      const r=await fetch('/api/security/reports').then(r=>r.json());
+      if(!s.ok||!r.ok||!r.reports.length){{dot.style.background='#555';dot.title='NO SCANS YET';return;}}
+      const rpt=r.reports[0];
+      const harmful=rpt.harmful_content?.length??0;
+      const broken=rpt.broken_links?.length??0;
+      const sslOk=rpt.ssl?.ok;
+      if(harmful>0||!sslOk){{dot.style.background='#ff2222';dot.style.boxShadow='0 0 8px #ff2222';dot.title='CRITICAL ISSUES';}}
+      else if(broken>0||(rpt.content_changes?.length??0)>0){{dot.style.background='#ffaa00';dot.style.boxShadow='0 0 8px #ffaa00';dot.title='WARNINGS';}}
+      else{{dot.style.background='#00ff88';dot.style.boxShadow='0 0 8px #00ff88';dot.title='ALL CLEAR';}}
+    }}catch{{dot.style.background='#555';}}
+  }}
+  updateDot();setInterval(updateDot,30000);
+}})();
 if($('newsFeed')){{loadNewsFeed();setInterval(()=>{{if($('newsFeed'))loadNewsFeed();}},300000);}}
 if($('dmConvList')){{['tabContentDM','tabContentGroup','tabContentPrivate','tabContentBoard'].forEach((id,i)=>{{const el=$(id);if(el)el.style.display=i===0?'block':'none';}});loadDMConversations();loadGroups();loadPrivateRooms();if(isMobile()){{mobileShowSidebar('dm');mobileShowSidebar('group');mobileShowSidebar('private');}}setInterval(()=>{{if(activeDMUser)loadDMThread(activeDMUser,false);if(activeGroupId)loadGroupThread(activeGroupId,activeGroupName,false);if(activePrivateRoomId)loadPrivateThread(activePrivateRoomId,activePrivateRoomName,false);}},5000);}}
 (function(){{const c=document.createElement('canvas');c.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:0.18;';document.body.insertBefore(c,document.body.firstChild);const ctx=c.getContext('2d');const chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%^&*()アイウエオカキクケコサシスセソタチツテトナニヌネノ';let cols,drops,color;function getColor(){{return getComputedStyle(document.documentElement).getPropertyValue('--p').trim()||'#00ff00';}}function resize(){{c.width=window.innerWidth;c.height=window.innerHeight;cols=Math.floor(c.width/16);drops=Array(cols).fill(1);color=getColor();}}resize();window.addEventListener('resize',resize);new MutationObserver(()=>{{color=getColor();}}).observe(document.documentElement,{{attributes:true,attributeFilter:['style']}});setInterval(()=>{{color=getColor();ctx.fillStyle='rgba(0,0,0,0.05)';ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=color;ctx.font='14px Courier New';for(let i=0;i<drops.length;i++){{ctx.fillText(chars[Math.floor(Math.random()*chars.length)],i*16,drops[i]*16);if(drops[i]*16>c.height&&Math.random()>0.975)drops[i]=0;drops[i]++;}}}} ,50);}})();"""
