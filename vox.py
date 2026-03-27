@@ -8,7 +8,7 @@ import ssl,socket,threading,urllib.parse
 from bs4 import BeautifulSoup
 try:
     from anthropic import Anthropic as _Anthropic
-    _anthropic_client=_Anthropic(api_keys.environ.get("ANTHROPIC_AOI_KEY"))
+    _anthropic_client=_Anthropic(api_keys.environ.get("ANTHROPIC_API_KEY"))
 except Exception: _anthropic_client=None
 _BASE=pathlib.Path(__file__).parent.resolve()
 app=Flask(__name__)
