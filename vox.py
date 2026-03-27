@@ -1147,13 +1147,14 @@ def handle_exception(e):
 # ══════════════════════════════════════════════════════════════════════════════
 # SECURITY HUB — integrated scanner
 # ══════════════════════════════════════════════════════════════════════════════
-_SEC_TARGET   = os.environ.get("TARGET_URL","")          # site to scan (set in Railway vars)
-_SEC_MAX_PAGES= int(os.environ.get("SEC_MAX_PAGES","80"))
-_SEC_INTERVAL = int(os.environ.get("SEC_INTERVAL_MINS","60"))
-_SEC_COOKIE   = os.environ.get("SESSION_COOKIE","")      # logged-in session cookie to bypass login
-_SEC_STATE_FILE= str(_BASE/"sec_state.json")
+_SEC_TARGET      = os.environ.get("TARGET_URL","")         # site to scan (set in Railway vars)
+_SEC_MAX_PAGES   = int(os.environ.get("SEC_MAX_PAGES","80"))
+_SEC_INTERVAL    = int(os.environ.get("SEC_INTERVAL_MINS","60"))
+_SEC_USERNAME    = os.environ.get("SEC_USERNAME","")       # admin username for scanner login
+_SEC_PASSWORD_ENC= os.environ.get("SEC_PASSWORD_ENC","")  # Fernet-encrypted password for scanner
+_SEC_STATE_FILE  = str(_BASE/"sec_state.json")
 _SEC_REPORTS_FILE= str(_BASE/"sec_reports.json")
-_SEC_LOCK     = threading.Lock()
+_SEC_LOCK        = threading.Lock()
 
 _HARMFUL_KEYWORDS=[
     "kill","murder","terrorist","bomb","nazi","white supremacy",
@@ -1170,12 +1171,22 @@ def _sec_load_state():
 def _sec_save_state(s):
     with open(_SEC_STATE_FILE,"w") as f: _json.dump(s,f)
 
-def _sec_headers():
-    h={"User-Agent":"VoxSecBot/1.0"}
-    if _SEC_COOKIE: h["Cookie"]=_SEC_COOKIE
-    return h
+def _sec_get_session():
+    import requests as _req
+    s=_req.Session()
+    s.headers.update({"User-Agent":"VoxSecBot/1.0"})
+    if not _SEC_TARGET or not _SEC_USERNAME or not _SEC_PASSWORD_ENC:
+        return s
+    try:
+        pw=fernet.decrypt(_SEC_PASSWORD_ENC.encode()).decode()
+        login_url=_SEC_TARGET.rstrip("/")+"/api/login"
+        s.post(login_url,json={"username":_SEC_USERNAME,"password":pw},timeout=10)
+    except Exception as e:
+        app.logger.warning(f"SecBot login failed: {e}")
+    return s
 
 def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
+    sess=_sec_get_session()
     visited,queue=[],[base_url];seen=set()
     domain=urllib.parse.urlparse(base_url).netloc
     while queue and len(visited)<max_pages:
@@ -1183,7 +1194,7 @@ def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
         if url in seen: continue
         seen.add(url)
         try:
-            r=requests.get(url,timeout=8,headers=_sec_headers(),allow_redirects=True)
+            r=sess.get(url,timeout=8,allow_redirects=True)
             visited.append(url)
             soup=BeautifulSoup(r.text,"html.parser")
             for a in soup.find_all("a",href=True):
@@ -1191,7 +1202,7 @@ def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
                 if urllib.parse.urlparse(full).netloc==domain and full not in seen:
                     queue.append(full)
         except Exception: seen.add(url)
-    return visited
+    return visited,sess
 
 def _sec_check_ssl(hostname):
     try:
@@ -1203,20 +1214,20 @@ def _sec_check_ssl(hostname):
         return {"ok":days>14,"days_left":days,"expiry":cert["notAfter"]}
     except Exception as e: return {"ok":False,"days_left":-1,"error":str(e)}
 
-def _sec_broken_links(pages):
+def _sec_broken_links(pages,sess):
     broken=[]
     for url in pages:
         try:
-            r=requests.head(url,timeout=6,allow_redirects=True,headers=_sec_headers())
+            r=sess.head(url,timeout=6,allow_redirects=True)
             if r.status_code>=400: broken.append({"url":url,"status":r.status_code})
         except Exception as e: broken.append({"url":url,"status":"error","detail":str(e)})
     return broken
 
-def _sec_content_changes(pages,state):
+def _sec_content_changes(pages,state,sess):
     changes=[];hashes=state.get("page_hashes",{})
     for url in pages:
         try:
-            r=requests.get(url,timeout=8,headers=_sec_headers())
+            r=sess.get(url,timeout=8)
             h=hashlib.sha256(r.text.encode()).hexdigest()
             if url in hashes and hashes[url]!=h:
                 changes.append({"url":url,"prev":hashes[url][:12],"new":h[:12]})
@@ -1225,11 +1236,11 @@ def _sec_content_changes(pages,state):
     state["page_hashes"]=hashes
     return changes
 
-def _sec_harmful(pages):
+def _sec_harmful(pages,sess):
     findings=[]
     for url in pages:
         try:
-            r=requests.get(url,timeout=8,headers=_sec_headers())
+            r=sess.get(url,timeout=8)
             text=r.text.lower()
             hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
             if hits: findings.append({"url":url,"keywords":hits})
@@ -1282,11 +1293,11 @@ def _sec_run_scan():
     if not _SEC_TARGET: return {"error":"TARGET_URL not set"}
     state=_sec_load_state()
     hostname=urllib.parse.urlparse(_SEC_TARGET).netloc
-    pages=_sec_crawl(_SEC_TARGET)
+    pages,sess=_sec_crawl(_SEC_TARGET)
     ssl_result=_sec_check_ssl(hostname)
-    broken=_sec_broken_links(pages)
-    changes=_sec_content_changes(pages,state)
-    harmful=_sec_harmful(pages)
+    broken=_sec_broken_links(pages,sess)
+    changes=_sec_content_changes(pages,state,sess)
+    harmful=_sec_harmful(pages,sess)
     report={
         "timestamp":utc_now(),"target":_SEC_TARGET,
         "pages_scanned":len(pages),"ssl":ssl_result,
@@ -1321,6 +1332,13 @@ def _sec_scheduler():
 threading.Thread(target=_sec_scheduler,daemon=True).start()
 
 # ── Security API routes ───────────────────────────────────────────────────────
+@app.route("/api/security/encrypt-password",methods=["POST"])
+def api_sec_encrypt_password():
+    if e:=require_admin(): return e
+    pw=(request.json or {}).get("password","").strip()
+    if not pw: return err("PASSWORD REQUIRED")
+    return ok(encrypted=fernet.encrypt(pw.encode()).decode())
+
 @app.route("/api/security/reports")
 def api_sec_reports():
     if e:=require_admin(): return e
