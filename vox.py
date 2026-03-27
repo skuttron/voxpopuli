@@ -1149,7 +1149,7 @@ def handle_exception(e):
 # ══════════════════════════════════════════════════════════════════════════════
 _SEC_TARGET      = os.environ.get("TARGET_URL","")         # site to scan (set in Railway vars)
 _SEC_MAX_PAGES   = int(os.environ.get("SEC_MAX_PAGES","80"))
-_SEC_INTERVAL    = int(os.environ.get("SEC_INTERVAL_MINS","60"))
+_SEC_INTERVAL    = int(os.environ.get("SEC_INTERVAL_MINS","120"))
 _SEC_USERNAME    = os.environ.get("SEC_USERNAME","")       # admin username for scanner login
 _SEC_PASSWORD_ENC= os.environ.get("SEC_PASSWORD_ENC","")  # Fernet-encrypted password for scanner
 _SEC_STATE_FILE  = str(_BASE/"sec_state.json")
