@@ -484,12 +484,12 @@ if($('dmConvList')){{['tabContentDM','tabContentGroup','tabContentPrivate','tabC
 @app.route("/")
 def home():
     user=session.get("username");theme=session.get("theme","green");admin=is_admin(user)
-    # COMMS tile = public (visible to everyone)
-    # VOX POPULI tile = hidden from admin, shown to regular users only
+    # COMMS tile     = logged-in users only (not public)
+    # VOX POPULI tile = admin only
     # All other tiles = admin only
     def _tile(i,l,h):
-        if l=="VOX POPULI" and admin: return ""          # hide from admin
-        if l!="COMMS" and l!="VOX POPULI" and not admin: return ""  # others admin-only
+        if l=="COMMS" and not user: return ""            # must be logged in
+        if l!="COMMS" and not admin: return ""           # everything else = admin only
         if h=="#": return f'<a class="tile" href="#"><i class="fas {i}"></i><div>| {l} |</div></a>'
         return f'<a class="tile" href="{h}" target="_blank" rel="noopener noreferrer"><i class="fas {i}"></i><div>| {l} |</div></a>'
     tiles="".join(_tile(i,l,h) for i,l,h in NAV_ITEMS)
