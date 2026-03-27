@@ -8,7 +8,7 @@ import ssl,socket,threading,urllib.parse
 from bs4 import BeautifulSoup
 try:
     from anthropic import Anthropic as _Anthropic
-    _anthropic_client=_Anthropic(api_keys=OS.environ.get("ANTHROPIC_API_KEY"))
+    _anthropic_client=_Anthropic()
 except Exception: _anthropic_client=None
 _BASE=pathlib.Path(__file__).parent.resolve()
 app=Flask(__name__)
@@ -1231,18 +1231,46 @@ def _sec_harmful(pages):
     return findings
 
 def _sec_ai_analysis(report):
-    if not _anthropic_client: return "Claude API not configured."
-    try:
-        msg=_anthropic_client.messages.create(
-            model="claude-opus-4-5",max_tokens=800,
-            messages=[{"role":"user","content":
-                f"You are a security analyst. Analyze this scan and give:\n"
-                f"1. 2-sentence executive summary\n2. Critical issues needing immediate action\n"
-                f"3. Overall risk: LOW/MEDIUM/HIGH/CRITICAL\n\nData:\n{_json.dumps(report,indent=2)}"
-            }]
-        )
-        return msg.content[0].text
-    except Exception as e: return f"AI analysis error: {e}"
+    prompt=(
+        f"You are a security analyst. Analyze this scan and give:\n"
+        f"1. 2-sentence executive summary\n2. Critical issues needing immediate action\n"
+        f"3. Overall risk: LOW/MEDIUM/HIGH/CRITICAL\n\nData:\n{_json.dumps(report,indent=2)}"
+    )
+    claude_out=None
+    gemini_out=None
+
+    # ── Claude analysis ──────────────────────────────────────────────────────
+    if _anthropic_client:
+        try:
+            msg=_anthropic_client.messages.create(
+                model="claude-opus-4-5",max_tokens=800,
+                messages=[{"role":"user","content":prompt}]
+            )
+            claude_out=msg.content[0].text
+        except Exception as e:
+            claude_out=f"Claude error: {e}"
+
+    # ── Gemini analysis ──────────────────────────────────────────────────────
+    gemini_key=os.environ.get("GEMINI_API_KEY","")
+    if gemini_key:
+        try:
+            payload=_json.dumps({"contents":[{"parts":[{"text":prompt}]}],
+                "generationConfig":{"maxOutputTokens":800,"temperature":0.4}}).encode()
+            req=urllib.request.Request(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
+                data=payload,headers={"Content-Type":"application/json"})
+            with urllib.request.urlopen(req,timeout=20) as resp:
+                gdata=_json.loads(resp.read().decode())
+            gemini_out=gdata["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except Exception as e:
+            gemini_out=f"Gemini error: {e}"
+
+    # ── Merge outputs ────────────────────────────────────────────────────────
+    parts=[]
+    if claude_out:  parts.append(f"[CLAUDE]\n{claude_out}")
+    if gemini_out:  parts.append(f"[GEMINI]\n{gemini_out}")
+    if not parts:   return "No AI APIs configured (set ANTHROPIC_API_KEY and/or GEMINI_API_KEY)."
+    return "\n\n─────────────────────────\n\n".join(parts)
 
 def _sec_run_scan():
     if not _SEC_TARGET: return {"error":"TARGET_URL not set"}
