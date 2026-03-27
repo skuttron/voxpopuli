@@ -1356,14 +1356,18 @@ def _sec_run_scan():
     return report
 
 # ── Auto-scan background thread ───────────────────────────────────────────────
+_SEC_NEXT_SCAN=None
+
 def _sec_scheduler():
+    global _SEC_NEXT_SCAN
     import time as _time
-    _time.sleep(30)  # give app time to start
+    _time.sleep(30)
     while True:
         if _SEC_TARGET:
             try:
                 with _SEC_LOCK: _sec_run_scan()
             except Exception as e: app.logger.error(f"Security scan error: {e}")
+        _SEC_NEXT_SCAN=datetime.datetime.utcnow()+datetime.timedelta(minutes=_SEC_INTERVAL)
         _time.sleep(_SEC_INTERVAL*60)
 
 threading.Thread(target=_sec_scheduler,daemon=True).start()
@@ -1400,7 +1404,7 @@ def api_sec_status():
         with open(_SEC_REPORTS_FILE) as f:
             rpts=_json.load(f)
             if rpts: last=rpts[0].get("timestamp")
-    return ok(scanning=_SEC_LOCK.locked(),last_scan=last,target=_SEC_TARGET,interval=_SEC_INTERVAL)
+    return ok(scanning=_SEC_LOCK.locked(),last_scan=last,target=_SEC_TARGET,interval=_SEC_INTERVAL,next_scan=_SEC_NEXT_SCAN.isoformat() if _SEC_NEXT_SCAN else None)
 
 @app.route("/security")
 def security_dashboard():
@@ -1483,14 +1487,13 @@ def security_dashboard():
 </div></div>
 
 <script>
-let _secInterval=120,_secLastScan=null,_secCountdownTimer=null;
+let _secInterval=120,_secNextScan=null,_secCountdownTimer=null;
 
 function secStartCountdown(){
   if(_secCountdownTimer) clearInterval(_secCountdownTimer);
   _secCountdownTimer=setInterval(()=>{
-    if(!_secLastScan){document.getElementById('secCountdown').textContent='—';return;}
-    const next=new Date(_secLastScan).getTime()+_secInterval*60*1000;
-    const diff=Math.max(0,Math.floor((next-Date.now())/1000));
+    if(!_secNextScan){document.getElementById('secCountdown').textContent='—';return;}
+    const diff=Math.max(0,Math.floor((new Date(_secNextScan+'Z').getTime()-Date.now())/1000));
     const h=Math.floor(diff/3600),m=Math.floor((diff%3600)/60),s=diff%60;
     const fmt=v=>String(v).padStart(2,'0');
     document.getElementById('secCountdown').textContent=h>0?`${fmt(h)}:${fmt(m)}:${fmt(s)}`:`${fmt(m)}:${fmt(s)}`;
@@ -1501,7 +1504,7 @@ async function secLoad(){
   const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
   if(s.ok){
     _secInterval=s.interval||120;
-    _secLastScan=s.last_scan||null;
+    _secNextScan=s.next_scan||null;
     document.getElementById('secInterval').textContent=s.interval||'?';
     secStartCountdown();
   }
@@ -1528,7 +1531,6 @@ async function secLoad(){
   document.getElementById('secChanges').style.color=ch>0?'#ffaa00':'var(--p)';
   document.getElementById('secAI').textContent=r.ai_analysis||'No analysis.';
   document.getElementById('secLastScan').textContent=r.timestamp?new Date(r.timestamp).toLocaleString():'—';
-  if(r.timestamp){_secLastScan=r.timestamp;secStartCountdown();}
   const bll=document.getElementById('secBrokenList');
   bll.innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const hml=document.getElementById('secHarmfulList');
