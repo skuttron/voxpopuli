@@ -27,13 +27,8 @@ def get_database_url():
 DATABASE_URL=get_database_url()
 ADMIN_USER="Eagleone"
 _KEY_FILE=str(_BASE/"secret.key")
-_fernet_key=os.environ.get("FERNET_KEY","")
-if _fernet_key:
-    fernet=Fernet(_fernet_key.encode() if isinstance(_fernet_key,str) else _fernet_key)
-else:
-    if not os.path.exists(_KEY_FILE): open(_KEY_FILE,"wb").write(Fernet.generate_key())
-    fernet=Fernet(open(_KEY_FILE,"rb").read())
-    app.logger.warning("FERNET_KEY env var not set — messages will break on redeploy! Set FERNET_KEY in Railway.")
+if not os.path.exists(_KEY_FILE): open(_KEY_FILE,"wb").write(Fernet.generate_key())
+fernet=Fernet(open(_KEY_FILE,"rb").read())
 VAPID_PUBLIC_KEY=os.environ.get("VAPID_PUBLIC_KEY","BAyH6Y_hbhzzmRgt3pd5Qa7guYKYKfsVCVIZsJGF0zYPfBupcKm24bduVIj4585JSjeeu3aeR19d4tBzlHgQIdU")
 VAPID_PRIVATE_KEY=os.environ.get("VAPID_PRIVATE_KEY","MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOqLakrDhZhnH_KBh5nwx2l0jyGfOWplqyE82s4Ryws2hRANCAAQMh-mP4W4c85kYLd6XeUGu4LmCmCn7FQlSGbCRhdM2D3wbqXCptuG3blSI-OfOSUo3nrt2nkdfXeLQc5R4ECHV")
 VAPID_CLAIMS={"sub":"mailto:admin@voxpopuli.app"}
