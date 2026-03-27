@@ -283,7 +283,7 @@ def shell(content,user=None,theme="green",unread=0):
             f'<div class="dropdown-menu" id="accountMenu"><div class="dropdown-item" style="opacity:.5;font-size:10px;cursor:default;pointer-events:none;padding:8px 16px;">&#9658; {user.upper()} [{t["name"]}]</div>'
             f'<div class="dropdown-divider"></div><a class="dropdown-item" onclick="openModal(\'settingsModal\')"><i class="fas fa-cog"></i> SETTINGS</a>'
             f'<a class="dropdown-item" onclick="enableNotifications()" id="notifMenuItem"><i class="fas fa-bell"></i> ENABLE NOTIFICATIONS</a>'
-            f'<a class="dropdown-item" href="/security"><i class="fas fa-shield-alt"></i> SECURITY HUB</a><a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a></div></div>')
+            f'<a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a></div></div>')
         grid_style='grid-template-columns:auto 1fr auto'
         right_btns=(
             '<a href="/security" id="secNavBtn" title="SECURITY HUB" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 12px;color:var(--p);background:var(--p10);font-family:\'Courier New\',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;box-shadow:0 0 8px var(--p30);transition:.2s;" onmouseover="this.style.background=\'var(--p)\';this.style.color=\'#000\'" onmouseout="this.style.background=\'var(--p10)\';this.style.color=\'var(--p)\'">&#128737; SEC <span id="secStatusDot" style="width:9px;height:9px;border-radius:50%;background:#555;display:inline-block;margin-left:2px;transition:.4s;"></span></a>'
@@ -403,18 +403,59 @@ function switchTab(tab){{['DM','Group','Private','Board'].forEach(t=>{{const tl=
 loadTrafficCounter();setInterval(loadTrafficCounter,10000);requestNotifPermission();checkNotifications();setInterval(checkNotifications,8000);loadOnlineUsers();setInterval(loadOnlineUsers,10000);
 (async function secNavPoll(){{
   const dot=document.getElementById('secStatusDot');if(!dot)return;
+  const DISMISS_KEY='vox_sec_dismiss';
+  // Inject alert bar into body (once)
+  if(!document.getElementById('_secAlertBar')){{
+    const bar=document.createElement('div');
+    bar.id='_secAlertBar';
+    bar.style.cssText='display:none;position:fixed;top:0;left:0;width:100%;z-index:99999;background:#cc0000;color:#fff;font-family:\'Courier New\',monospace;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;padding:10px 16px;box-sizing:border-box;display:none;align-items:center;justify-content:space-between;gap:12px;animation:tcPulse 1.5s infinite;';
+    bar.innerHTML='<span id="_secAlertMsg">&#9888; CRITICAL SECURITY ALERT</span><button onclick="window._secDismiss()" style="background:#fff;color:#cc0000;border:none;border-radius:6px;padding:5px 14px;font-family:\'Courier New\',monospace;font-size:11px;font-weight:bold;cursor:pointer;letter-spacing:1px;">&#10006; DISMISS</button>';
+    document.body.prepend(bar);
+  }}
+  window._secDismiss=function(){{
+    const dismissed=JSON.parse(localStorage.getItem(DISMISS_KEY)||'{{}}');
+    dismissed.until=Date.now()+(2*60*60*1000); // dismiss for 2 hours
+    localStorage.setItem(DISMISS_KEY,JSON.stringify(dismissed));
+    document.getElementById('_secAlertBar').style.display='none';
+    // Restore original theme CSS vars
+    const root=document.documentElement;
+    root.style.removeProperty('--p');root.style.removeProperty('--bg');
+    root.style.removeProperty('--ac');root.style.removeProperty('--p10');
+    root.style.removeProperty('--p30');
+  }};
   async function updateDot(){{
     try{{
-      const s=await fetch('/api/security/status').then(r=>r.json());
       const r=await fetch('/api/security/reports').then(r=>r.json());
-      if(!s.ok||!r.ok||!r.reports.length){{dot.style.background='#555';dot.title='NO SCANS YET';return;}}
+      if(!r.ok||!r.reports.length){{dot.style.background='#555';dot.title='NO SCANS YET';return;}}
       const rpt=r.reports[0];
       const harmful=rpt.harmful_content?.length??0;
       const broken=rpt.broken_links?.length??0;
       const sslOk=rpt.ssl?.ok;
-      if(harmful>0||!sslOk){{dot.style.background='#ff2222';dot.style.boxShadow='0 0 8px #ff2222';dot.title='CRITICAL ISSUES';}}
-      else if(broken>0||(rpt.content_changes?.length??0)>0){{dot.style.background='#ffaa00';dot.style.boxShadow='0 0 8px #ffaa00';dot.title='WARNINGS';}}
-      else{{dot.style.background='#00ff88';dot.style.boxShadow='0 0 8px #00ff88';dot.title='ALL CLEAR';}}
+      const changes=rpt.content_changes?.length??0;
+      const dismissed=JSON.parse(localStorage.getItem(DISMISS_KEY)||'{{}}');
+      const isDismissed=dismissed.until&&Date.now()<dismissed.until;
+      const bar=document.getElementById('_secAlertBar');
+      const root=document.documentElement;
+      if(harmful>0||!sslOk){{
+        dot.style.background='#ff2222';dot.style.boxShadow='0 0 8px #ff2222';dot.title='CRITICAL — CLICK TO VIEW';
+        if(!isDismissed){{
+          // Switch entire theme to red alert
+          root.style.setProperty('--p','#ff2222');root.style.setProperty('--bg','#0a0000');
+          root.style.setProperty('--ac','#330000');root.style.setProperty('--p10','#ff222233');
+          root.style.setProperty('--p30','#ff222266');
+          if(bar){{bar.style.display='flex';document.getElementById('_secAlertMsg').textContent='\u26a0 CRITICAL: '+(harmful>0?harmful+' HARMFUL PAGE'+(harmful>1?'S':'')+' DETECTED':'SSL CERTIFICATE ISSUE');}}
+        }}
+      }}else if(broken>0||changes>0){{
+        dot.style.background='#ffaa00';dot.style.boxShadow='0 0 8px #ffaa00';dot.title='WARNINGS — CLICK TO VIEW';
+        if(bar)bar.style.display='none';
+        root.style.removeProperty('--p');root.style.removeProperty('--bg');
+        root.style.removeProperty('--ac');root.style.removeProperty('--p10');root.style.removeProperty('--p30');
+      }}else{{
+        dot.style.background='#00ff88';dot.style.boxShadow='0 0 8px #00ff88';dot.title='ALL CLEAR';
+        if(bar)bar.style.display='none';
+        root.style.removeProperty('--p');root.style.removeProperty('--bg');
+        root.style.removeProperty('--ac');root.style.removeProperty('--p10');root.style.removeProperty('--p30');
+      }}
     }}catch{{dot.style.background='#555';}}
   }}
   updateDot();setInterval(updateDot,30000);
@@ -1131,6 +1172,8 @@ def _svg_icon(size,text_y,font_size,sub_y=None,sub_text=None):
     try:
         import cairosvg;return Response(cairosvg.svg2png(bytestring=svg,output_width=size,output_height=size),mimetype="image/png")
     except Exception: return Response(svg,mimetype="image/svg+xml")
+@app.route("/favicon.ico")
+def favicon(): return _svg_icon(32,20,10)
 @app.route("/icon-192.png")
 def icon_192(): return _svg_icon(192,108,34)
 @app.route("/icon-512.png")
@@ -1165,7 +1208,7 @@ _HARMFUL_PATTERNS=[
     r"\bsql injection\b",r"\bransomware\b",r"\bphishing\b",
 ]
 # Pages the scanner skips — your own app routes that need a logged-in session
-_SEC_SKIP_PATHS=["/api/","/logout","/sw.js","/manifest.json","/icon-"]
+_SEC_SKIP_PATHS=["/api/","/logout","/sw.js","/manifest.json","/icon-","/favicon.ico","/reset-"]
 
 def _sec_load_state():
     if os.path.exists(_SEC_STATE_FILE):
