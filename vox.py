@@ -1313,19 +1313,24 @@ def _sec_harmful(pages):
     return findings
 
 def _sec_ai_analysis(report):
-    if not _anthropic_client: return "AI analysis unavailable — set ANTHROPIC_API_KEY in Railway environment variables."
-    api_key=os.environ.get("ANTHROPIC_API_KEY","")
-    if not api_key: return "AI analysis unavailable — ANTHROPIC_API_KEY not set."
+    api_key=os.environ.get("GEMINI_API_KEY","")
+    if not api_key: return "AI analysis unavailable — set GEMINI_API_KEY in Railway environment variables."
     try:
-        msg=_anthropic_client.messages.create(
-            model="claude-haiku-4-5-20251001",max_tokens=600,
-            messages=[{"role":"user","content":
-                f"You are a security analyst. Analyze this scan and give:\n"
-                f"1. 2-sentence executive summary\n2. Critical issues needing immediate action\n"
-                f"3. Overall risk: LOW/MEDIUM/HIGH/CRITICAL\n\nData:\n{_json.dumps(report,indent=2)}"
-            }]
+        prompt=(
+            "You are a security analyst. Analyze this website scan and give:\n"
+            "1. 2-sentence executive summary\n"
+            "2. Critical issues needing immediate action\n"
+            "3. Overall risk: LOW/MEDIUM/HIGH/CRITICAL\n\n"
+            f"Data:\n{_json.dumps(report,indent=2)}"
         )
-        return msg.content[0].text
+        payload=_json.dumps({"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"maxOutputTokens":600,"temperature":0.4}}).encode()
+        req=urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            data=payload,headers={"Content-Type":"application/json"}
+        )
+        with urllib.request.urlopen(req,timeout=20) as resp:
+            data=_json.loads(resp.read().decode())
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
     except Exception as e: return f"AI analysis error: {e}"
 
 def _sec_run_scan():
