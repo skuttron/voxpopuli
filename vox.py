@@ -1254,13 +1254,52 @@ def _sec_content_changes(pages,state,sess):
 
 def _sec_harmful(pages,sess):
     findings=[]
+    # 1. scan public pages
     for url in pages:
         try:
             r=sess.get(url,timeout=8)
             text=r.text.lower()
             hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
-            if hits: findings.append({"url":url,"keywords":hits})
+            if hits: findings.append({"source":"page","url":url,"keywords":hits,"username":"","message":""})
         except Exception: pass
+    # 2. scan DB messages directly
+    try:
+        with db() as con:
+            # board posts
+            for row in fetchall(con,"SELECT username,content,created_at FROM posts"):
+                uname,content,ts=row
+                text=content.lower()
+                hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
+                if hits: findings.append({"source":"post","url":"Board Post","keywords":hits,"username":uname,"message":content,"timestamp":str(ts)})
+            # DMs
+            for row in fetchall(con,"SELECT sender,recipient,content_enc,timestamp FROM messages"):
+                sender,recipient,enc_content,ts=row
+                try:
+                    content=dec(enc_content)
+                    text=content.lower()
+                    hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
+                    if hits: findings.append({"source":"dm","url":f"DM: {sender} → {recipient}","keywords":hits,"username":sender,"message":content,"timestamp":str(ts)})
+                except Exception: pass
+            # group messages
+            for row in fetchall(con,"SELECT gm.sender,g.name,gm.content_enc,gm.timestamp FROM group_messages gm JOIN groups g ON gm.group_id=g.id"):
+                sender,gname,enc_content,ts=row
+                try:
+                    content=dec(enc_content)
+                    text=content.lower()
+                    hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
+                    if hits: findings.append({"source":"channel","url":f"#{gname}","keywords":hits,"username":sender,"message":content,"timestamp":str(ts)})
+                except Exception: pass
+            # private room messages
+            for row in fetchall(con,"SELECT prm.sender,pr.name,prm.content_enc,prm.timestamp FROM private_room_messages prm JOIN private_rooms pr ON prm.room_id=pr.id"):
+                sender,rname,enc_content,ts=row
+                try:
+                    content=dec(enc_content)
+                    text=content.lower()
+                    hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
+                    if hits: findings.append({"source":"private","url":f"🔒 {rname}","keywords":hits,"username":sender,"message":content,"timestamp":str(ts)})
+                except Exception: pass
+    except Exception as e:
+        app.logger.warning(f"SecBot DB scan error: {e}")
     return findings
 
 def _sec_ai_analysis(report):
@@ -1479,7 +1518,16 @@ async function secLoad(){
   const bll=document.getElementById('secBrokenList');
   bll.innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const hml=document.getElementById('secHarmfulList');
-  hml.innerHTML=hm?r.harmful_content.map(h=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ff3355;">⚠</span> ${h.url}<br><span style="opacity:.5;font-size:9px;">${h.keywords.join(', ')}</span></div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
+  hml.innerHTML=hm?r.harmful_content.map(h=>`
+    <div style="padding:8px;margin-bottom:6px;border:1px solid #ff3355;border-radius:6px;background:#1a0005;">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;margin-bottom:4px;">
+        <span style="color:#ff3355;font-size:11px;font-weight:bold;">⚠ ${h.source?.toUpperCase()||'PAGE'} — ${h.url}</span>
+        ${h.timestamp?`<span style="opacity:.4;font-size:9px;">${new Date(h.timestamp).toLocaleString()}</span>`:''}
+      </div>
+      ${h.username?`<div style="font-size:11px;margin-bottom:3px;">👤 <span style="color:#ff8800;">${h.username}</span></div>`:''}
+      ${h.message?`<div style="font-size:11px;background:#0a0000;border-radius:4px;padding:5px 8px;margin-bottom:4px;word-break:break-word;opacity:.9;">"${h.message}"</div>`:''}
+      <div style="font-size:9px;color:#ff3355;letter-spacing:1px;">KEYWORDS: ${h.keywords.join(', ')}</div>
+    </div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const chl=document.getElementById('secChangesList');
   chl.innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
   // history bar
