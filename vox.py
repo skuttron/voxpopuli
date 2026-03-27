@@ -1425,32 +1425,31 @@ def security_dashboard():
   <!-- ALERT BANNER -->
   <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px;border-radius:8px;text-align:center;font-size:11px;letter-spacing:2px;margin-bottom:12px;animation:tcPulse 1.5s infinite;">&#9888; CRITICAL SECURITY ISSUES DETECTED &#9888;</div>
 
-  <!-- STAT CARDS -->
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px;">
-    <div style="border:1px solid var(--p);border-radius:8px;padding:8px 4px;text-align:center;">
-      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:3px;">PAGES</div>
-      <div id="secPages" style="font-size:18px;font-family:\'Courier New\',monospace;">—</div>
+  <!-- STAT ROWS -->
+  <div style="border:1px solid var(--p30);border-radius:8px;overflow:hidden;margin-bottom:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--p30);">
+      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">PAGES SCANNED</span>
+      <span id="secPages" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span>
     </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:8px 4px;text-align:center;">
-      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:3px;">SSL</div>
-      <div id="secSSL" style="font-size:18px;font-family:\'Courier New\',monospace;">—</div>
-      <div id="secSSLSub" style="font-size:7px;opacity:.5;margin-top:1px;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--p30);">
+      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">SSL CERT</span>
+      <span style="text-align:right;"><span id="secSSL" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span> <span id="secSSLSub" style="font-size:9px;opacity:.5;"></span></span>
     </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:8px 4px;text-align:center;">
-      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:3px;">BROKEN</div>
-      <div id="secBroken" style="font-size:18px;font-family:\'Courier New\',monospace;">—</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--p30);">
+      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">BROKEN LINKS</span>
+      <span id="secBroken" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span>
     </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:8px 4px;text-align:center;">
-      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:3px;">HARMFUL</div>
-      <div id="secHarmful" style="font-size:18px;font-family:\'Courier New\',monospace;">—</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--p30);">
+      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">HARMFUL CONTENT</span>
+      <span id="secHarmful" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span>
     </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:8px 4px;text-align:center;">
-      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:3px;">CHANGES</div>
-      <div id="secChanges" style="font-size:18px;font-family:\'Courier New\',monospace;">—</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--p30);">
+      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">CONTENT CHANGES</span>
+      <span id="secChanges" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span>
     </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:8px 4px;text-align:center;">
-      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:3px;">NEXT SCAN</div>
-      <div id="secCountdown" style="font-size:13px;font-family:\'Courier New\',monospace;">—</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;">
+      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">NEXT SCAN</span>
+      <span id="secCountdown" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span>
     </div>
   </div>
 
