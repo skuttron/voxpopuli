@@ -29,15 +29,28 @@ def get_database_url():
     return url
 DATABASE_URL=get_database_url()
 ADMIN_USER="Eagleone"
+# FERNET_KEY must be set as a Railway env var so it survives redeploys.
+# To generate one: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 _KEY_FILE=str(_BASE/"secret.key")
-if not os.path.exists(_KEY_FILE): open(_KEY_FILE,"wb").write(Fernet.generate_key())
-fernet=Fernet(open(_KEY_FILE,"rb").read())
+_fernet_key=os.environ.get("FERNET_KEY","")
+if _fernet_key:
+    # Preferred: use stable env var key
+    fernet=Fernet(_fernet_key.encode() if isinstance(_fernet_key,str) else _fernet_key)
+else:
+    # Fallback: file-based key (loses messages on redeploy — set FERNET_KEY to fix)
+    if not os.path.exists(_KEY_FILE): open(_KEY_FILE,"wb").write(Fernet.generate_key())
+    fernet=Fernet(open(_KEY_FILE,"rb").read())
+    app.logger.warning("FERNET_KEY env var not set — using file key, messages will break on redeploy!")
 VAPID_PUBLIC_KEY=os.environ.get("VAPID_PUBLIC_KEY","BAyH6Y_hbhzzmRgt3pd5Qa7guYKYKfsVCVIZsJGF0zYPfBupcKm24bduVIj4585JSjeeu3aeR19d4tBzlHgQIdU")
 VAPID_PRIVATE_KEY=os.environ.get("VAPID_PRIVATE_KEY","MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOqLakrDhZhnH_KBh5nwx2l0jyGfOWplqyE82s4Ryws2hRANCAAQMh-mP4W4c85kYLd6XeUGu4LmCmCn7FQlSGbCRhdM2D3wbqXCptuG3blSI-OfOSUo3nrt2nkdfXeLQc5R4ECHV")
 VAPID_CLAIMS={"sub":"mailto:admin@voxpopuli.app"}
 hash_pw=lambda pw:hashlib.sha256(pw.encode()).hexdigest()
 enc=lambda t:fernet.encrypt(t.encode()).decode()
-dec=lambda t:fernet.decrypt(t.encode()).decode() if t else ""
+def dec(t):
+    if not t: return ""
+    try: return fernet.decrypt(t.encode() if isinstance(t,str) else t).decode()
+    except Exception: return "[ENCRYPTED]"
+dec=dec
 get_ip=lambda:request.headers.get("X-Forwarded-For",request.remote_addr).split(",")[0].strip()
 logged_in=lambda:"username" in session
 me=lambda:session.get("username","")
