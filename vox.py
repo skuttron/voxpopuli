@@ -5,14 +5,7 @@ from contextlib import contextmanager
 from cryptography.fernet import Fernet
 # ── Security Scanner ──────────────────────────────────────────────────────────
 import ssl,socket,threading,urllib.parse
-try:
-    import requests as requests
-except ImportError:
-    requests=None
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    BeautifulSoup=None
+from bs4 import BeautifulSoup
 try:
     from anthropic import Anthropic as _Anthropic
     _anthropic_client=_Anthropic()
@@ -22,9 +15,9 @@ app=Flask(__name__)
 app.secret_key=os.environ.get("SECRET_KEY","fallback-if-missing")
 app.config['PERMANENT_SESSION_LIFETIME']=datetime.timedelta(days=90)
 app.config['SESSION_PERMANENT']=True
+# FIX 1: Added SameSite + HttpOnly so sessions persist properly across gunicorn workers
 app.config['SESSION_COOKIE_SAMESITE']='Lax'
 app.config['SESSION_COOKIE_HTTPONLY']=True
-app.config['SESSION_COOKIE_SECURE']=os.environ.get("RAILWAY_ENVIRONMENT") is not None
 def get_database_url():
     url=os.environ.get("DATABASE_URL","")
     if not url: raise RuntimeError("DATABASE_URL not set.")
@@ -33,28 +26,20 @@ def get_database_url():
     return url
 DATABASE_URL=get_database_url()
 ADMIN_USER="Eagleone"
-# FERNET_KEY must be set as a Railway env var so it survives redeploys.
-# To generate one: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 _KEY_FILE=str(_BASE/"secret.key")
 _fernet_key=os.environ.get("FERNET_KEY","")
 if _fernet_key:
-    # Preferred: use stable env var key
     fernet=Fernet(_fernet_key.encode() if isinstance(_fernet_key,str) else _fernet_key)
 else:
-    # Fallback: file-based key (loses messages on redeploy — set FERNET_KEY to fix)
     if not os.path.exists(_KEY_FILE): open(_KEY_FILE,"wb").write(Fernet.generate_key())
     fernet=Fernet(open(_KEY_FILE,"rb").read())
-    app.logger.warning("FERNET_KEY env var not set — using file key, messages will break on redeploy!")
+    app.logger.warning("FERNET_KEY env var not set — messages will break on redeploy! Set FERNET_KEY in Railway.")
 VAPID_PUBLIC_KEY=os.environ.get("VAPID_PUBLIC_KEY","BAyH6Y_hbhzzmRgt3pd5Qa7guYKYKfsVCVIZsJGF0zYPfBupcKm24bduVIj4585JSjeeu3aeR19d4tBzlHgQIdU")
 VAPID_PRIVATE_KEY=os.environ.get("VAPID_PRIVATE_KEY","MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOqLakrDhZhnH_KBh5nwx2l0jyGfOWplqyE82s4Ryws2hRANCAAQMh-mP4W4c85kYLd6XeUGu4LmCmCn7FQlSGbCRhdM2D3wbqXCptuG3blSI-OfOSUo3nrt2nkdfXeLQc5R4ECHV")
 VAPID_CLAIMS={"sub":"mailto:admin@voxpopuli.app"}
 hash_pw=lambda pw:hashlib.sha256(pw.encode()).hexdigest()
 enc=lambda t:fernet.encrypt(t.encode()).decode()
-def dec(t):
-    if not t: return ""
-    try: return fernet.decrypt(t.encode() if isinstance(t,str) else t).decode()
-    except Exception: return "[ENCRYPTED]"
-dec=dec
+dec=lambda t:fernet.decrypt(t.encode()).decode() if t else ""
 get_ip=lambda:request.headers.get("X-Forwarded-For",request.remote_addr).split(",")[0].strip()
 logged_in=lambda:"username" in session
 me=lambda:session.get("username","")
@@ -180,11 +165,11 @@ def theme_css(t):
         f".scanline-a{{position:fixed;left:0;width:100%;height:10px;background:linear-gradient(to bottom,transparent,var(--p30),transparent);filter:blur(2px);animation:scan 5s linear infinite 1s;pointer-events:none;z-index:1}}",
         f".scanline-b{{position:fixed;left:0;width:100%;height:4px;background:var(--p);opacity:.12;animation:scan 9s linear infinite 4s;pointer-events:none;z-index:1}}",
         f".scanline-c{{position:fixed;left:0;width:100%;height:24px;background:linear-gradient(to bottom,transparent,{p}22,transparent);filter:blur(5px);animation:scan 18s linear infinite 0s;pointer-events:none;z-index:1}}",
-        f".crt-overlay{{position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,{p}08 2px,{p}08 4px);pointer-events:none!important;z-index:1;animation:crtflicker 0.15s infinite}}",
+        f".crt-overlay{{position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,{p}08 2px,{p}08 4px);pointer-events:none;z-index:1;animation:crtflicker 0.15s infinite}}",
         "@keyframes scan{0%{top:-10%}100%{top:110%}}@keyframes crtflicker{0%,100%{opacity:1}50%{opacity:.97}}@keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}@keyframes tcPulse{0%,100%{opacity:1;box-shadow:0 0 6px var(--p)}50%{opacity:.4;box-shadow:none}}",
         ".logo-wrap{display:flex;justify-content:center;padding:28px 0 16px;position:relative;z-index:2}",
         ".title-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;margin:0 0 20px;position:relative;z-index:2}",
-        ".title-center{display:flex;align-items:center;justify-content:center}.title-row-right{display:flex;align-items:center;justify-content:flex-end;gap:8px;position:relative;z-index:2000}",
+        ".title-center{display:flex;align-items:center;justify-content:center}.title-row-right{display:flex;align-items:center;justify-content:flex-end;gap:8px}",
         ".menu-wrap{position:relative;z-index:1000}.title-row-wrap{max-width:960px;margin:0 auto;padding:28px 16px 0;position:relative;z-index:1000}",
         ".command-wrapper{position:relative;z-index:2}",
         ".dropdown-menu{display:none;position:absolute;top:calc(100% + 8px);left:0;background:rgba(0,0,0,.98);border:2px solid var(--p);border-radius:var(--r);box-shadow:0 0 30px var(--p30);z-index:9999;min-width:220px;max-width:260px;width:max-content}",
@@ -193,7 +178,7 @@ def theme_css(t):
         ".dropdown-item:hover{background:var(--p);color:#000}.dropdown-item:last-child{border-bottom:none;border-radius:0 0 var(--r) var(--r)}.dropdown-item i{width:20px;text-align:center;font-size:13px}.dropdown-divider{border-top:1px solid var(--p30);margin:4px 0}",
         ".menu-trigger{cursor:pointer;user-select:none;border:2px solid var(--p);border-radius:8px;padding:0;color:var(--p);background:var(--p10);font-family:'Courier New',monospace;font-size:12px;font-weight:bold;text-transform:uppercase;box-shadow:0 0 8px var(--p30);transition:.2s;white-space:nowrap;display:inline-flex;align-items:center;overflow:hidden}",
         ".menu-trigger:hover{background:var(--p);color:#000;box-shadow:0 0 16px var(--p)}",
-        ".hero-btn{border:2px solid var(--p);border-radius:10px;padding:10px 20px;color:var(--p);background:var(--p10);cursor:pointer;font-family:'Courier New',monospace;font-size:15px;font-weight:bold;text-transform:uppercase;letter-spacing:2px;white-space:nowrap;box-shadow:0 0 18px var(--p30);transition:.2s;position:relative;z-index:2000}",
+        ".hero-btn{border:2px solid var(--p);border-radius:10px;padding:10px 20px;color:var(--p);background:var(--p10);cursor:pointer;font-family:'Courier New',monospace;font-size:15px;font-weight:bold;text-transform:uppercase;letter-spacing:2px;white-space:nowrap;box-shadow:0 0 18px var(--p30);transition:.2s}",
         ".hero-btn:hover{background:var(--p);color:#000;box-shadow:0 0 30px var(--p)}",
         ".tile-grid{display:inline-grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:4px;margin:8px 0;position:relative;z-index:2;box-sizing:border-box;padding:2px 0;width:100%}",
         ".tile{border:2px solid var(--p);border-radius:8px;padding:8px 2px;background:transparent;color:var(--p);text-decoration:none;transition:.25s;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 0 8px var(--p30);text-align:center;position:relative;z-index:2;width:100%}",
@@ -203,7 +188,7 @@ def theme_css(t):
         ".column{border:3px solid var(--p);border-radius:var(--r);padding:24px 20px;background:transparent;box-shadow:0 0 20px var(--p30);display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;z-index:2}",
         ".column h3{margin:0 0 10px;font-size:16px}.column p{margin:0;font-size:13px;opacity:.8}",
         ".btn-action{border:2px solid var(--p);border-radius:8px;padding:10px 22px;color:var(--p);text-decoration:none;display:inline-block;background:var(--p10);margin-top:14px;cursor:pointer;font-family:'Courier New',monospace;font-size:13px;text-transform:uppercase;transition:.2s;position:relative;z-index:2}",
-        ".modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.93);z-index:99000;justify-content:center;align-items:flex-start;overflow-y:auto;padding:20px;box-sizing:border-box}",
+        ".modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.93);z-index:9000;justify-content:center;align-items:flex-start;overflow-y:auto;padding:20px;box-sizing:border-box}",
         ".modal-overlay.open{display:flex}.modal-box{border:3px solid var(--p);border-radius:var(--r);padding:28px 24px;min-width:min(340px,92vw);max-width:540px;width:100%;background:#000;box-shadow:0 0 60px var(--p);text-align:center;margin:auto;position:relative;z-index:2}",
         ".modal-box h2{margin:0 0 18px;letter-spacing:5px;text-shadow:0 0 20px var(--p);font-size:clamp(14px,4vw,22px)}",
         ".field-wrap{position:relative;margin:8px 0}.field,.field-plain{width:100%;box-sizing:border-box;background:#000;border:2px solid var(--p);border-radius:8px;color:var(--p);font-family:'Courier New',monospace;font-size:13px;text-transform:none}",
@@ -266,8 +251,7 @@ def theme_css(t):
         "}@media(min-width:701px){.mobile-back-btn{display:none!important}.comms-sidebar,.comms-main{display:flex}}",
     ])
 def pw_field(fid,ph,ac="current-password"):
-    enter="if(event.key==='Enter')doLogin();" if fid=="loginPass" else ""
-    return (f'<div class="field-wrap"><input class="field" id="{fid}" placeholder="{ph}" type="password" autocomplete="{ac}" onkeydown="{enter}">'
+    return (f'<div class="field-wrap"><input class="field" id="{fid}" placeholder="{ph}" type="password" autocomplete="{ac}">'
             f'<button class="eye-btn" type="button" onclick="togglePw(\'{fid}\',this)">&#128065;</button></div>')
 def theme_btns(fn):
     entries=[("green","#0f0"),("cyan","#0ff"),("amber","#fb0"),("red","#f22"),("purple","#c4f"),("white","#fff")]
@@ -302,9 +286,9 @@ def shell(content,user=None,theme="green",unread=0):
             f'<span style="font-size:16px;">&#9776;</span><span style="border-left:1px solid var(--p);opacity:.4;height:16px;"></span>'
             f'<span style="font-size:12px;letter-spacing:1px;">{user}</span>{at_badge}<span style="font-size:10px;opacity:.6;">&#9663;</span></div>'
             f'<div class="dropdown-menu" id="accountMenu"><div class="dropdown-item" style="opacity:.5;font-size:10px;cursor:default;pointer-events:none;padding:8px 16px;">&#9658; {user.upper()} [{t["name"]}]</div>'
-            f'<div class="dropdown-divider"></div><a class="dropdown-item" onclick="event.stopPropagation();openModal(\'settingsModal\')"><i class="fas fa-cog"></i> SETTINGS</a>'
-            f'<a class="dropdown-item" onclick="event.stopPropagation();enableNotifications()" id="notifMenuItem"><i class="fas fa-bell"></i> ENABLE NOTIFICATIONS</a>'
-            f'<a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a></div></div>')
+            f'<div class="dropdown-divider"></div><a class="dropdown-item" onclick="openModal(\'settingsModal\')"><i class="fas fa-cog"></i> SETTINGS</a>'
+            f'<a class="dropdown-item" onclick="enableNotifications()" id="notifMenuItem"><i class="fas fa-bell"></i> ENABLE NOTIFICATIONS</a>'
+            f'<a class="dropdown-item" href="/security"><i class="fas fa-shield-alt"></i> SECURITY HUB</a><a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt"></i> LOGOUT</a></div></div>')
         grid_style='grid-template-columns:auto 1fr auto'
         right_btns=(
             '<a href="/security" id="secNavBtn" title="SECURITY HUB" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 12px;color:var(--p);background:var(--p10);font-family:\'Courier New\',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;box-shadow:0 0 8px var(--p30);transition:.2s;" onmouseover="this.style.background=\'var(--p)\';this.style.color=\'#000\'" onmouseout="this.style.background=\'var(--p10)\';this.style.color=\'var(--p)\'">&#128737; SEC <span id="secStatusDot" style="width:9px;height:9px;border-radius:50%;background:#555;display:inline-block;margin-left:2px;transition:.4s;"></span></a>'
@@ -337,9 +321,7 @@ let regThemeVal='green',onlineUsers=new Set();
 let _prevNotif={{dm:-1,group:-1,private:-1,posts:-1,groups:{{}},private_rooms:{{}}}};
 let _notifReady=false,_notifPermission=false;
 const IS_ADMIN={str(admin).lower()};
-const _NO_RELOAD_ROUTES=['/api/login','/api/register','/api/reset'];
-const api=async(url,body)=>{{try{{const r=await fetch(url,body?{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}}:undefined);const ct=r.headers.get('content-type')||'';if(!ct.includes('json')){{if(!_NO_RELOAD_ROUTES.some(p=>url.startsWith(p))){{location.reload();}}return{{ok:false,error:'SESSION_EXPIRED'}};}}return await r.json();}}catch(e){{return{{ok:false,error:String(e)}};}}}};
-
+const api=(url,body)=>fetch(url,body?{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}}:undefined).then(r=>r.json());
 const $=id=>document.getElementById(id);
 const isMobile=()=>window.innerWidth<=700;
 const openModal=id=>{{const el=$(id);if(el)el.classList.add('open');}};
@@ -348,7 +330,7 @@ function togglePw(id,btn){{const i=$(id);i.type=i.type==='password'?'text':'pass
 document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{{if(e.target===m)m.classList.remove('open');}}));
 document.addEventListener('click',e=>{{const menu=$('accountMenu');if(menu&&!e.target.closest('.menu-wrap'))menu.classList.remove('open');if(!e.target.closest('#newDmUser')&&!e.target.closest('#dmUserSuggest'))hideDmSuggest();}});
 function setRegTheme(t){{regThemeVal=t;}}
-async function doLogin(){{const errEl=$('loginErr');errEl.textContent='';const u=$('loginUser').value.trim(),p=$('loginPass').value;if(!u||!p){{errEl.textContent='USERNAME AND PASSWORD REQUIRED';return;}}errEl.style.color='#ff4';errEl.textContent='AUTHENTICATING...';const d=await api('/api/login',{{username:u,password:p}});if(d.ok){{errEl.style.color='#4f4';errEl.textContent='ACCESS GRANTED — LOADING...';setTimeout(()=>location.reload(),300);}}else{{errEl.style.color='#f44';errEl.textContent='ERROR: '+(d.error||'LOGIN FAILED');}}}}
+async function doLogin(){{const errEl=$('loginErr');errEl.textContent='';const d=await api('/api/login',{{username:$('loginUser').value.trim(),password:$('loginPass').value}});if(d.ok){{location.reload();}}else{{errEl.textContent='ERROR: '+d.error;}}}}
 async function doRegister(){{const p=$('regPass').value,p2=$('regPass2').value,dob=$('regDob').value,errEl=$('regErr');errEl.textContent='';if(!dob){{errEl.textContent='DATE OF BIRTH REQUIRED';return;}}if((Date.now()-new Date(dob))/31557600000<18){{errEl.textContent='YOU MUST BE 18 OR OLDER TO JOIN';return;}}if(p!==p2){{errEl.textContent='PASSWORDS DO NOT MATCH';return;}}const d=await api('/api/register',{{username:$('regUser').value.trim(),password:p,theme:regThemeVal}});if(d.ok){{location.reload();}}else{{errEl.textContent='ERROR: '+d.error;}}}}
 async function doResetRequest(){{const u=$('resetUser').value.trim(),errEl=$('resetErr'),okEl=$('resetOk');errEl.textContent='';okEl.textContent='';if(!u){{errEl.textContent='USERNAME REQUIRED';return;}}const d=await api('/api/reset/request',{{username:u}});if(d.ok){{okEl.textContent='REQUEST SENT — AN ADMIN WILL SET A TEMP PASSWORD FOR YOU.';}}else{{errEl.textContent='ERROR: '+d.error;}}}}
 async function changePassword(){{const cur=$('pwCurrent').value,nw=$('pwNew').value,nw2=$('pwNew2').value;const errEl=$('pwErr'),okEl=$('pwOk');errEl.textContent='';okEl.textContent='';if(!cur||!nw||!nw2){{errEl.textContent='ALL FIELDS REQUIRED';return;}}if(nw!==nw2){{errEl.textContent='PASSWORDS DO NOT MATCH';return;}}if(nw.length<6){{errEl.textContent='TOO SHORT (MIN 6)';return;}}const d=await api('/api/change-password',{{current:cur,new_password:nw}});if(d.ok){{okEl.textContent='PASSWORD UPDATED';['pwCurrent','pwNew','pwNew2'].forEach(i=>$(i).value='');}}else{{errEl.textContent='ERROR: '+d.error;}}}}
@@ -426,66 +408,25 @@ function switchTab(tab){{['DM','Group','Private','Board'].forEach(t=>{{const tl=
 loadTrafficCounter();setInterval(loadTrafficCounter,10000);requestNotifPermission();checkNotifications();setInterval(checkNotifications,8000);loadOnlineUsers();setInterval(loadOnlineUsers,10000);
 (async function secNavPoll(){{
   const dot=document.getElementById('secStatusDot');if(!dot)return;
-  const DISMISS_KEY='vox_sec_dismiss';
-  // Inject alert bar into body (once)
-  if(!document.getElementById('_secAlertBar')){{
-    const bar=document.createElement('div');
-    bar.id='_secAlertBar';
-    bar.style.cssText="display:none;position:fixed;top:0;left:0;width:100%;z-index:99999;background:#cc0000;color:#fff;font-family:'Courier New',monospace;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;padding:10px 16px;box-sizing:border-box;align-items:center;justify-content:space-between;gap:12px;animation:tcPulse 1.5s infinite;";
-    bar.innerHTML='<span id="_secAlertMsg">&#9888; CRITICAL SECURITY ALERT</span><button onclick="window._secDismiss()" style="background:#fff;color:#cc0000;border:none;border-radius:6px;padding:5px 14px;font-family:Courier New,monospace;font-size:11px;font-weight:bold;cursor:pointer;letter-spacing:1px;">&#10006; DISMISS</button>';
-    document.body.prepend(bar);
-  }}
-  window._secDismiss=function(){{
-    const dismissed=JSON.parse(localStorage.getItem(DISMISS_KEY)||'{{}}');
-    dismissed.until=Date.now()+(2*60*60*1000); // dismiss for 2 hours
-    localStorage.setItem(DISMISS_KEY,JSON.stringify(dismissed));
-    document.getElementById('_secAlertBar').style.display='none';
-    // Restore original theme CSS vars
-    const root=document.documentElement;
-    root.style.removeProperty('--p');root.style.removeProperty('--bg');
-    root.style.removeProperty('--ac');root.style.removeProperty('--p10');
-    root.style.removeProperty('--p30');
-  }};
   async function updateDot(){{
     try{{
+      const s=await fetch('/api/security/status').then(r=>r.json());
       const r=await fetch('/api/security/reports').then(r=>r.json());
-      if(!r.ok||!r.reports.length){{dot.style.background='#555';dot.title='NO SCANS YET';return;}}
+      if(!s.ok||!r.ok||!r.reports.length){{dot.style.background='#555';dot.title='NO SCANS YET';return;}}
       const rpt=r.reports[0];
       const harmful=rpt.harmful_content?.length??0;
       const broken=rpt.broken_links?.length??0;
       const sslOk=rpt.ssl?.ok;
-      const changes=rpt.content_changes?.length??0;
-      const dismissed=JSON.parse(localStorage.getItem(DISMISS_KEY)||'{{}}');
-      const isDismissed=dismissed.until&&Date.now()<dismissed.until;
-      const bar=document.getElementById('_secAlertBar');
-      const root=document.documentElement;
-      if((harmful>0||!sslOk)&&r.reports[0].pages_scanned>0){{
-        dot.style.background='#ff2222';dot.style.boxShadow='0 0 8px #ff2222';dot.title='CRITICAL — CLICK TO VIEW';
-        if(!isDismissed){{
-          // Switch entire theme to red alert
-          root.style.setProperty('--p','#ff2222');root.style.setProperty('--bg','#0a0000');
-          root.style.setProperty('--ac','#330000');root.style.setProperty('--p10','#ff222233');
-          root.style.setProperty('--p30','#ff222266');
-          if(bar){{bar.style.display='flex';document.getElementById('_secAlertMsg').textContent='\u26a0 CRITICAL: '+(harmful>0?harmful+' HARMFUL PAGE'+(harmful>1?'S':'')+' DETECTED':'SSL CERTIFICATE ISSUE');}}
-        }}
-      }}else if(broken>0||changes>0){{
-        dot.style.background='#ffaa00';dot.style.boxShadow='0 0 8px #ffaa00';dot.title='WARNINGS — CLICK TO VIEW';
-        if(bar)bar.style.display='none';
-        root.style.removeProperty('--p');root.style.removeProperty('--bg');
-        root.style.removeProperty('--ac');root.style.removeProperty('--p10');root.style.removeProperty('--p30');
-      }}else{{
-        dot.style.background='#00ff88';dot.style.boxShadow='0 0 8px #00ff88';dot.title='ALL CLEAR';
-        if(bar)bar.style.display='none';
-        root.style.removeProperty('--p');root.style.removeProperty('--bg');
-        root.style.removeProperty('--ac');root.style.removeProperty('--p10');root.style.removeProperty('--p30');
-      }}
+      if(harmful>0||!sslOk){{dot.style.background='#ff2222';dot.style.boxShadow='0 0 8px #ff2222';dot.title='CRITICAL ISSUES';}}
+      else if(broken>0||(rpt.content_changes?.length??0)>0){{dot.style.background='#ffaa00';dot.style.boxShadow='0 0 8px #ffaa00';dot.title='WARNINGS';}}
+      else{{dot.style.background='#00ff88';dot.style.boxShadow='0 0 8px #00ff88';dot.title='ALL CLEAR';}}
     }}catch{{dot.style.background='#555';}}
   }}
   updateDot();setInterval(updateDot,30000);
 }})();
 if($('newsFeed')){{loadNewsFeed();setInterval(()=>{{if($('newsFeed'))loadNewsFeed();}},300000);}}
 if($('dmConvList')){{['tabContentDM','tabContentGroup','tabContentPrivate','tabContentBoard'].forEach((id,i)=>{{const el=$(id);if(el)el.style.display=i===0?'block':'none';}});loadDMConversations();loadGroups();loadPrivateRooms();if(isMobile()){{mobileShowSidebar('dm');mobileShowSidebar('group');mobileShowSidebar('private');}}setInterval(()=>{{if(activeDMUser)loadDMThread(activeDMUser,false);if(activeGroupId)loadGroupThread(activeGroupId,activeGroupName,false);if(activePrivateRoomId)loadPrivateThread(activePrivateRoomId,activePrivateRoomName,false);}},5000);}}
-(function(){{const c=document.createElement('canvas');c.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;z-index:-1;pointer-events:none!important;opacity:0.18;';document.body.insertBefore(c,document.body.firstChild);const ctx=c.getContext('2d');const chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%^&*()アイウエオカキクケコサシスセソタチツテトナニヌネノ';let cols,drops,color;function getColor(){{return getComputedStyle(document.documentElement).getPropertyValue('--p').trim()||'#00ff00';}}function resize(){{c.width=window.innerWidth;c.height=window.innerHeight;cols=Math.floor(c.width/16);drops=Array(cols).fill(1);color=getColor();}}resize();window.addEventListener('resize',resize);new MutationObserver(()=>{{color=getColor();}}).observe(document.documentElement,{{attributes:true,attributeFilter:['style']}});setInterval(()=>{{color=getColor();ctx.fillStyle='rgba(0,0,0,0.05)';ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=color;ctx.font='14px Courier New';for(let i=0;i<drops.length;i++){{ctx.fillText(chars[Math.floor(Math.random()*chars.length)],i*16,drops[i]*16);if(drops[i]*16>c.height&&Math.random()>0.975)drops[i]=0;drops[i]++;}}}} ,50);}})();"""
+(function(){{const c=document.createElement('canvas');c.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:0.18;';document.body.insertBefore(c,document.body.firstChild);const ctx=c.getContext('2d');const chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%^&*()アイウエオカキクケコサシスセソタチツテトナニヌネノ';let cols,drops,color;function getColor(){{return getComputedStyle(document.documentElement).getPropertyValue('--p').trim()||'#00ff00';}}function resize(){{c.width=window.innerWidth;c.height=window.innerHeight;cols=Math.floor(c.width/16);drops=Array(cols).fill(1);color=getColor();}}resize();window.addEventListener('resize',resize);new MutationObserver(()=>{{color=getColor();}}).observe(document.documentElement,{{attributes:true,attributeFilter:['style']}});setInterval(()=>{{color=getColor();ctx.fillStyle='rgba(0,0,0,0.05)';ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=color;ctx.font='14px Courier New';for(let i=0;i<drops.length;i++){{ctx.fillText(chars[Math.floor(Math.random()*chars.length)],i*16,drops[i]*16);if(drops[i]*16>c.height&&Math.random()>0.975)drops[i]=0;drops[i]++;}}}} ,50);}})();"""
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8">
@@ -510,10 +451,10 @@ if($('dmConvList')){{['tabContentDM','tabContentGroup','tabContentPrivate','tabC
 <div class="page-content" style="width:100%;max-width:960px;margin:0 auto;padding:0 12px 40px;box-sizing:border-box;">{content}</div>
 <div class="modal-overlay" id="loginModal"><div class="modal-box">
   <h2>// ACCESS //</h2><div id="loginErr" class="error-msg"></div>
-  <input class="field-plain" id="loginUser" placeholder="USERNAME" type="text" autocomplete="username" style="text-transform:none;" onkeydown="if(event.key==='Enter')doLogin();">
+  <input class="field-plain" id="loginUser" placeholder="USERNAME" type="text" autocomplete="username" style="text-transform:none;">
   {pw_field("loginPass","PASSWORD")}
-  <br><button class="btn-action" style="width:100%;margin-top:8px;padding:12px;" onclick="doLogin()">&#9658; AUTHENTICATE</button>
-  <button class="btn-action" style="margin-top:8px;width:100%;" onclick="closeModal('loginModal')">&#10006; CANCEL</button>
+  <br><button class="btn-action" onclick="doLogin()">&#9658; AUTHENTICATE</button>
+  <button class="btn-action" style="margin-left:8px;" onclick="closeModal('loginModal')">&#10006; CANCEL</button>
   <div style="margin-top:14px;font-size:11px;opacity:.6;">FORGOT YOUR PASSWORD? <span style="text-decoration:underline;cursor:pointer;color:var(--p);" onclick="closeModal('loginModal');openModal('resetModal')">REQUEST A RESET</span></div>
 </div></div>
 <div class="modal-overlay" id="resetModal"><div class="modal-box">
@@ -1195,8 +1136,6 @@ def _svg_icon(size,text_y,font_size,sub_y=None,sub_text=None):
     try:
         import cairosvg;return Response(cairosvg.svg2png(bytestring=svg,output_width=size,output_height=size),mimetype="image/png")
     except Exception: return Response(svg,mimetype="image/svg+xml")
-@app.route("/favicon.ico")
-def favicon(): return _svg_icon(32,20,10)
 @app.route("/icon-192.png")
 def icon_192(): return _svg_icon(192,108,34)
 @app.route("/icon-512.png")
@@ -1220,18 +1159,12 @@ _SEC_STATE_FILE= str(_BASE/"sec_state.json")
 _SEC_REPORTS_FILE= str(_BASE/"sec_reports.json")
 _SEC_LOCK     = threading.Lock()
 
-# Whole-word patterns — won't match "skill", "bombardment", "klassic", etc.
-# Also won't fire on your own app's source code or UI text.
-_HARMFUL_PATTERNS=[
-    r"\bkill\b",r"\bmurder\b",r"\bterrorist\b",r"\bnazi\b",
-    r"\bwhite supremacy\b",r"\bnigger\b",r"\bfaggot\b",
-    r"\bchink\b",r"\bspic\b",r"\bhate speech\b",
-    r"\brake\b(?!.*css)",          # rape but not background-rake or similar
-    r"\bmolest\b",r"\bchild porn\b",
-    r"\bsql injection\b",r"\bransomware\b",r"\bphishing\b",
+_HARMFUL_KEYWORDS=[
+    "kill","murder","terrorist","bomb","nazi","white supremacy",
+    "nigger","faggot","chink","spic","hate speech",
+    "rape","molest","child porn","hack the","sql injection",
+    "ddos","ransomware","phishing",
 ]
-# Pages the scanner skips — your own app routes that need a logged-in session
-_SEC_SKIP_PATHS=["/api/","/logout","/sw.js","/manifest.json","/icon-","/favicon.ico","/reset-"]
 
 def _sec_load_state():
     if os.path.exists(_SEC_STATE_FILE):
@@ -1241,30 +1174,21 @@ def _sec_load_state():
 def _sec_save_state(s):
     with open(_SEC_STATE_FILE,"w") as f: _json.dump(s,f)
 
-def _sec_skip(url):
-    """Return True for URLs we should never scan (API routes, assets, etc)."""
-    path=urllib.parse.urlparse(url).path
-    return any(path.startswith(p) for p in _SEC_SKIP_PATHS)
-
 def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
-    if not requests: return []
     visited,queue=[],[base_url];seen=set()
     domain=urllib.parse.urlparse(base_url).netloc
     while queue and len(visited)<max_pages:
         url=queue.pop(0)
-        if url in seen or _sec_skip(url): continue
+        if url in seen: continue
         seen.add(url)
         try:
             r=requests.get(url,timeout=8,headers={"User-Agent":"VoxSecBot/1.0"},allow_redirects=True)
-            # Only scan pages that the public can actually see (not login-walled content)
-            if r.status_code==200:
-                visited.append(url)
-                if BeautifulSoup:
-                    soup=BeautifulSoup(r.text,"html.parser")
-                    for a in soup.find_all("a",href=True):
-                        full=urllib.parse.urljoin(url,a["href"])
-                        if urllib.parse.urlparse(full).netloc==domain and full not in seen and not _sec_skip(full):
-                            queue.append(full)
+            visited.append(url)
+            soup=BeautifulSoup(r.text,"html.parser")
+            for a in soup.find_all("a",href=True):
+                full=urllib.parse.urljoin(url,a["href"])
+                if urllib.parse.urlparse(full).netloc==domain and full not in seen:
+                    queue.append(full)
         except Exception: seen.add(url)
     return visited
 
@@ -1301,68 +1225,46 @@ def _sec_content_changes(pages,state):
     return changes
 
 def _sec_harmful(pages):
-    import re as _re
     findings=[]
     for url in pages:
-        if _sec_skip(url): continue
         try:
             r=requests.get(url,timeout=8,headers={"User-Agent":"VoxSecBot/1.0"})
-            if r.status_code!=200: continue
-            # Strip HTML tags so we only check visible text, not source code/CSS/JS
-            if not BeautifulSoup: continue
-            soup=BeautifulSoup(r.text,"html.parser")
-            for tag in soup(["script","style","code","pre"]): tag.decompose()
-            visible_text=soup.get_text(separator=" ").lower()
-            hits=[p for p in _HARMFUL_PATTERNS if _re.search(p,visible_text)]
+            text=r.text.lower()
+            hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
             if hits: findings.append({"url":url,"keywords":hits})
         except Exception: pass
     return findings
 
 def _sec_ai_analysis(report):
-    api_key=os.environ.get("GEMINI_API_KEY","")
-    if not api_key: return "AI analysis unavailable — set GEMINI_API_KEY in Railway environment variables."
+    if not _anthropic_client: return "Claude API not configured."
     try:
-        prompt=(
-            "You are a security analyst. Analyze this website scan and give:\n"
-            "1. 2-sentence executive summary\n"
-            "2. Critical issues needing immediate action\n"
-            "3. Overall risk: LOW/MEDIUM/HIGH/CRITICAL\n\n"
-            f"Data:\n{_json.dumps(report,indent=2)}"
+        msg=_anthropic_client.messages.create(
+            model="claude-opus-4-5",max_tokens=800,
+            messages=[{"role":"user","content":
+                f"You are a security analyst. Analyze this scan and give:\n"
+                f"1. 2-sentence executive summary\n2. Critical issues needing immediate action\n"
+                f"3. Overall risk: LOW/MEDIUM/HIGH/CRITICAL\n\nData:\n{_json.dumps(report,indent=2)}"
+            }]
         )
-        payload=_json.dumps({"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"maxOutputTokens":600,"temperature":0.4}}).encode()
-        req=urllib.request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
-            data=payload,headers={"Content-Type":"application/json"}
-        )
-        with urllib.request.urlopen(req,timeout=20) as resp:
-            data=_json.loads(resp.read().decode())
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return msg.content[0].text
     except Exception as e: return f"AI analysis error: {e}"
 
 def _sec_run_scan():
     if not _SEC_TARGET: return {"error":"TARGET_URL not set"}
     state=_sec_load_state()
-    # Always use https for scanning so SSL check works correctly
-    target=_SEC_TARGET
-    if target.startswith("http://"): target="https://"+target[7:]
-    parsed=urllib.parse.urlparse(target)
-    hostname=parsed.netloc
-    pages=_sec_crawl(target)
-    # Only check SSL if site is actually https
-    ssl_result=_sec_check_ssl(hostname) if target.startswith("https://") else {"ok":True,"days_left":999,"note":"http only"}
+    hostname=urllib.parse.urlparse(_SEC_TARGET).netloc
+    pages=_sec_crawl(_SEC_TARGET)
+    ssl_result=_sec_check_ssl(hostname)
     broken=_sec_broken_links(pages)
     changes=_sec_content_changes(pages,state)
     harmful=_sec_harmful(pages)
     report={
-        "timestamp":utc_now(),"target":target,
+        "timestamp":utc_now(),"target":_SEC_TARGET,
         "pages_scanned":len(pages),"ssl":ssl_result,
         "broken_links":broken,"content_changes":changes,"harmful_content":harmful,
     }
     report["ai_analysis"]=_sec_ai_analysis(report)
-    # Only critical if there are actual findings — not just SSL on http sites
-    _ssl_ok=ssl_result.get("ok",True)
-    _real_ssl_issue=not _ssl_ok and ssl_result.get("days_left",-1)>=0  # -1 means connection error
-    report["is_critical"]=bool(harmful or _real_ssl_issue or len(broken)>5)
+    report["is_critical"]=bool(harmful or not ssl_result.get("ok") or len(broken)>5)
     # Notify admin via push if critical
     if report["is_critical"]:
         summary=f"⚠ SECURITY ALERT: {len(harmful)} harmful, {len(broken)} broken links, SSL={'OK' if ssl_result.get('ok') else 'ISSUE'}"
@@ -1423,10 +1325,7 @@ def security_dashboard():
     content='''<div style="width:min(100%,960px);margin:0 auto;padding:16px;box-sizing:border-box;">
 <div style="border:2px solid var(--p);border-radius:var(--r);padding:20px;margin-bottom:20px;background:var(--p10);">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
-    <div style="display:flex;align-items:center;gap:12px;">
-      <a href="/" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 12px;color:var(--p);background:var(--p10);font-family:'Courier New',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;transition:.2s;" onmouseover="this.style.background='var(--p)';this.style.color='#000'" onmouseout="this.style.background='var(--p10)';this.style.color='var(--p)'">&#9664; BACK</a>
-      <h2 style="margin:0;letter-spacing:4px;font-size:clamp(14px,3vw,20px);">&#128737; SECURITY HUB</h2>
-    </div>
+    <h2 style="margin:0;letter-spacing:4px;font-size:clamp(14px,3vw,20px);">&#128737; SECURITY HUB</h2>
     <div style="display:flex;gap:8px;align-items:center;">
       <span id="secTarget" style="font-size:10px;opacity:.5;"></span>
       <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 18px;font-size:11px;">&#9654; SCAN NOW</button>
