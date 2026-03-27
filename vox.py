@@ -1476,7 +1476,7 @@ def security_dashboard():
     </div>
     <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128200; SCAN HISTORY</div>
-      <div id="secHistoryBar" style="display:flex;align-items:flex-end;gap:3px;height:50px;"></div>
+      <div id="secHistoryBar" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
     </div>
   </div>
 
@@ -1537,15 +1537,22 @@ function secRender(r,isLatest=true){
 
 function secRenderHistory(activeIdx){
   const bar=document.getElementById('secHistoryBar');bar.innerHTML='';
-  _secAllReports.slice(0,30).reverse().forEach((rpt,i)=>{
-    const realIdx=Math.min(29,_secAllReports.length-1)-i;
+  const shown=_secAllReports.slice(0,4);
+  shown.forEach((rpt,i)=>{
     const issues=(rpt.broken_links?.length??0)+(rpt.harmful_content?.length??0)*3+(!rpt.ssl?.ok?5:0);
-    const h=Math.max(4,Math.min(42,4+issues*3));
-    const col=rpt.harmful_content?.length>0?'#ff3355':issues>3?'#ffaa00':'var(--p)';
-    const active=realIdx===activeIdx;
-    bar.innerHTML+=`<div onclick="secRender(_secAllReports[${realIdx}],${realIdx===0});secRenderHistory(${realIdx});"
-      title="${new Date(rpt.timestamp).toLocaleString()} — ${issues} issues"
-      style="flex:1;min-width:6px;height:${h}px;background:${col};border-radius:2px 2px 0 0;align-self:flex-end;cursor:pointer;opacity:${active?1:0.45};outline:${active?'2px solid #fff':'none'};transition:.15s;"></div>`;
+    const hasHarmful=rpt.harmful_content?.length>0;
+    const col=hasHarmful?'#ff3355':issues>3?'#ffaa00':'var(--p)';
+    const active=i===activeIdx;
+    const dt=new Date(rpt.timestamp);
+    const label=dt.toLocaleDateString([],{month:'short',day:'numeric'})+' '+dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    const statusIcon=hasHarmful?'⚠':issues>3?'~':'✓';
+    bar.innerHTML+=`<div onclick="secRender(_secAllReports[${i}],${i===0});secRenderHistory(${i});"
+      style="flex:1;min-width:0;padding:8px 6px;border:2px solid ${col};border-radius:8px;text-align:center;cursor:pointer;
+             background:${active?col+'33':'transparent'};transition:.15s;box-sizing:border-box;">
+      <div style="font-size:14px;">${statusIcon}</div>
+      <div style="font-size:8px;opacity:.7;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</div>
+      <div style="font-size:9px;color:${col};margin-top:2px;">${i===0?'LATEST':`SCAN ${i+1}`}</div>
+    </div>`;
   });
 }
 
