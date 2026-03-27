@@ -3,6 +3,13 @@ from flask import Flask,request,session,redirect,jsonify,Response
 import psycopg2,psycopg2.extras,os,hashlib,datetime,urllib.request,re,html as _html,pathlib,json as _json,time
 from contextlib import contextmanager
 from cryptography.fernet import Fernet
+# ── Security Scanner ──────────────────────────────────────────────────────────
+import ssl,socket,threading,urllib.parse
+from bs4 import BeautifulSoup
+try:
+    from anthropic import Anthropic as _Anthropic
+    _anthropic_client=_Anthropic()
+except Exception: _anthropic_client=None
 _BASE=pathlib.Path(__file__).parent.resolve()
 app=Flask(__name__)
 app.secret_key=os.environ.get("SECRET_KEY","fallback-if-missing")
@@ -477,12 +484,15 @@ if($('dmConvList')){{['tabContentDM','tabContentGroup','tabContentPrivate','tabC
 @app.route("/")
 def home():
     user=session.get("username");theme=session.get("theme","green");admin=is_admin(user)
-    # *** CHANGED: all tiles except VOX POPULI are admin-only ***
-    def _tile(i,l,h,restrict=False):
-        if restrict and not admin: return ""
+    # COMMS tile = public (visible to everyone)
+    # VOX POPULI tile = hidden from admin, shown to regular users only
+    # All other tiles = admin only
+    def _tile(i,l,h):
+        if l=="VOX POPULI" and admin: return ""          # hide from admin
+        if l!="COMMS" and l!="VOX POPULI" and not admin: return ""  # others admin-only
         if h=="#": return f'<a class="tile" href="#"><i class="fas {i}"></i><div>| {l} |</div></a>'
         return f'<a class="tile" href="{h}" target="_blank" rel="noopener noreferrer"><i class="fas {i}"></i><div>| {l} |</div></a>'
-    tiles="".join(_tile(i,l,h,restrict=(l!="VOX POPULI")) for i,l,h in NAV_ITEMS)
+    tiles="".join(_tile(i,l,h) for i,l,h in NAV_ITEMS)
     def _bdg(i): return f'<span id="{i}" style="display:none;background:var(--p);color:#000;border-radius:50%;padding:1px 5px;font-size:9px;margin-left:3px;"></span>'
     board_tab=f'''<div class="tab-content" id="tabContentBoard"><div style="display:flex;flex-direction:column;height:100%;"><div style="flex:1;overflow-y:auto;max-height:320px;background:rgba(0,0,0,.75);" id="postFeed"><div style="padding:16px;opacity:.4;text-align:center;font-size:11px;">LOADING...</div></div><div id="postErr" class="error-msg" style="padding:0 12px;margin:0;"></div><div style="padding:9px 10px;border-top:2px solid var(--p);display:flex;gap:7px;align-items:flex-end;background:rgba(0,0,0,.9);"><textarea id="postContent" placeholder="SHARE WITH THE COMMUNITY..." oninput="updatePostCount(this)" style="flex:1;padding:9px 14px;background:rgba(0,0,0,.8);border:2px solid var(--p);border-radius:12px;color:var(--p);font-family:'Courier New',monospace;font-size:12px;text-transform:none;resize:none;height:38px;max-height:120px;overflow-y:auto;line-height:1.4;box-sizing:border-box;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){{event.preventDefault();submitPost();}}"></textarea><div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;"><span id="postCount" style="font-size:9px;opacity:.3;">0/500</span><button class="send-btn" onclick="submitPost()">&#9658;</button></div></div></div></div>'''
     chat_tabs=(f'<div class="tab-bar" style="border-left:2px solid var(--p);border-right:2px solid var(--p);">'
@@ -1112,4 +1122,295 @@ def emergency_reset():
 def handle_exception(e):
     import traceback;app.logger.error(traceback.format_exc())
     return f"<pre style='background:#111;color:#f44;padding:20px;font-size:12px;'>ERROR:\n{traceback.format_exc()}</pre>",500
+# ══════════════════════════════════════════════════════════════════════════════
+# SECURITY HUB — integrated scanner
+# ══════════════════════════════════════════════════════════════════════════════
+_SEC_TARGET   = os.environ.get("TARGET_URL","")          # site to scan (set in Railway vars)
+_SEC_MAX_PAGES= int(os.environ.get("SEC_MAX_PAGES","80"))
+_SEC_INTERVAL = int(os.environ.get("SEC_INTERVAL_MINS","60"))
+_SEC_STATE_FILE= str(_BASE/"sec_state.json")
+_SEC_REPORTS_FILE= str(_BASE/"sec_reports.json")
+_SEC_LOCK     = threading.Lock()
+
+_HARMFUL_KEYWORDS=[
+    "kill","murder","terrorist","bomb","nazi","white supremacy",
+    "nigger","faggot","chink","spic","hate speech",
+    "rape","molest","child porn","hack the","sql injection",
+    "ddos","ransomware","phishing",
+]
+
+def _sec_load_state():
+    if os.path.exists(_SEC_STATE_FILE):
+        with open(_SEC_STATE_FILE) as f: return _json.load(f)
+    return {"page_hashes":{},"last_scan":None}
+
+def _sec_save_state(s):
+    with open(_SEC_STATE_FILE,"w") as f: _json.dump(s,f)
+
+def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
+    visited,queue=[],[base_url];seen=set()
+    domain=urllib.parse.urlparse(base_url).netloc
+    while queue and len(visited)<max_pages:
+        url=queue.pop(0)
+        if url in seen: continue
+        seen.add(url)
+        try:
+            r=requests.get(url,timeout=8,headers={"User-Agent":"VoxSecBot/1.0"},allow_redirects=True)
+            visited.append(url)
+            soup=BeautifulSoup(r.text,"html.parser")
+            for a in soup.find_all("a",href=True):
+                full=urllib.parse.urljoin(url,a["href"])
+                if urllib.parse.urlparse(full).netloc==domain and full not in seen:
+                    queue.append(full)
+        except Exception: seen.add(url)
+    return visited
+
+def _sec_check_ssl(hostname):
+    try:
+        ctx=ssl.create_default_context()
+        with ctx.wrap_socket(socket.create_connection((hostname,443),timeout=8),server_hostname=hostname) as s:
+            cert=s.getpeercert()
+        expiry=datetime.datetime.strptime(cert["notAfter"],"%b %d %H:%M:%S %Y %Z")
+        days=(expiry-datetime.datetime.utcnow()).days
+        return {"ok":days>14,"days_left":days,"expiry":cert["notAfter"]}
+    except Exception as e: return {"ok":False,"days_left":-1,"error":str(e)}
+
+def _sec_broken_links(pages):
+    broken=[]
+    for url in pages:
+        try:
+            r=requests.head(url,timeout=6,allow_redirects=True,headers={"User-Agent":"VoxSecBot/1.0"})
+            if r.status_code>=400: broken.append({"url":url,"status":r.status_code})
+        except Exception as e: broken.append({"url":url,"status":"error","detail":str(e)})
+    return broken
+
+def _sec_content_changes(pages,state):
+    changes=[];hashes=state.get("page_hashes",{})
+    for url in pages:
+        try:
+            r=requests.get(url,timeout=8,headers={"User-Agent":"VoxSecBot/1.0"})
+            h=hashlib.sha256(r.text.encode()).hexdigest()
+            if url in hashes and hashes[url]!=h:
+                changes.append({"url":url,"prev":hashes[url][:12],"new":h[:12]})
+            hashes[url]=h
+        except Exception: pass
+    state["page_hashes"]=hashes
+    return changes
+
+def _sec_harmful(pages):
+    findings=[]
+    for url in pages:
+        try:
+            r=requests.get(url,timeout=8,headers={"User-Agent":"VoxSecBot/1.0"})
+            text=r.text.lower()
+            hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
+            if hits: findings.append({"url":url,"keywords":hits})
+        except Exception: pass
+    return findings
+
+def _sec_ai_analysis(report):
+    if not _anthropic_client: return "Claude API not configured."
+    try:
+        msg=_anthropic_client.messages.create(
+            model="claude-opus-4-5",max_tokens=800,
+            messages=[{"role":"user","content":
+                f"You are a security analyst. Analyze this scan and give:\n"
+                f"1. 2-sentence executive summary\n2. Critical issues needing immediate action\n"
+                f"3. Overall risk: LOW/MEDIUM/HIGH/CRITICAL\n\nData:\n{_json.dumps(report,indent=2)}"
+            }]
+        )
+        return msg.content[0].text
+    except Exception as e: return f"AI analysis error: {e}"
+
+def _sec_run_scan():
+    if not _SEC_TARGET: return {"error":"TARGET_URL not set"}
+    state=_sec_load_state()
+    hostname=urllib.parse.urlparse(_SEC_TARGET).netloc
+    pages=_sec_crawl(_SEC_TARGET)
+    ssl_result=_sec_check_ssl(hostname)
+    broken=_sec_broken_links(pages)
+    changes=_sec_content_changes(pages,state)
+    harmful=_sec_harmful(pages)
+    report={
+        "timestamp":utc_now(),"target":_SEC_TARGET,
+        "pages_scanned":len(pages),"ssl":ssl_result,
+        "broken_links":broken,"content_changes":changes,"harmful_content":harmful,
+    }
+    report["ai_analysis"]=_sec_ai_analysis(report)
+    report["is_critical"]=bool(harmful or not ssl_result.get("ok") or len(broken)>5)
+    # Notify admin via push if critical
+    if report["is_critical"]:
+        summary=f"⚠ SECURITY ALERT: {len(harmful)} harmful, {len(broken)} broken links, SSL={'OK' if ssl_result.get('ok') else 'ISSUE'}"
+        send_push(ADMIN_USER,"🚨 VOX SECURITY HUB",summary,tag="security")
+    # Persist
+    _sec_save_state(state)
+    reports=[]
+    if os.path.exists(_SEC_REPORTS_FILE):
+        with open(_SEC_REPORTS_FILE) as f: reports=_json.load(f)
+    reports.insert(0,report);reports=reports[:50]
+    with open(_SEC_REPORTS_FILE,"w") as f: _json.dump(reports,f)
+    return report
+
+# ── Auto-scan background thread ───────────────────────────────────────────────
+def _sec_scheduler():
+    import time as _time
+    _time.sleep(30)  # give app time to start
+    while True:
+        if _SEC_TARGET:
+            try:
+                with _SEC_LOCK: _sec_run_scan()
+            except Exception as e: app.logger.error(f"Security scan error: {e}")
+        _time.sleep(_SEC_INTERVAL*60)
+
+threading.Thread(target=_sec_scheduler,daemon=True).start()
+
+# ── Security API routes ───────────────────────────────────────────────────────
+@app.route("/api/security/reports")
+def api_sec_reports():
+    if e:=require_admin(): return e
+    if os.path.exists(_SEC_REPORTS_FILE):
+        with open(_SEC_REPORTS_FILE) as f: return jsonify({"ok":True,"reports":_json.load(f)})
+    return ok(reports=[])
+
+@app.route("/api/security/scan",methods=["POST"])
+def api_sec_scan():
+    if e:=require_admin(): return e
+    if _SEC_LOCK.locked(): return err("SCAN ALREADY RUNNING")
+    def _run():
+        with _SEC_LOCK: _sec_run_scan()
+    threading.Thread(target=_run,daemon=True).start()
+    return ok(status="started")
+
+@app.route("/api/security/status")
+def api_sec_status():
+    if e:=require_admin(): return e
+    last=None
+    if os.path.exists(_SEC_REPORTS_FILE):
+        with open(_SEC_REPORTS_FILE) as f:
+            rpts=_json.load(f)
+            if rpts: last=rpts[0].get("timestamp")
+    return ok(scanning=_SEC_LOCK.locked(),last_scan=last,target=_SEC_TARGET,interval=_SEC_INTERVAL)
+
+@app.route("/security")
+def security_dashboard():
+    if not is_admin(): return redirect("/")
+    user=me();theme=session.get("theme","green")
+    content='''<div style="width:min(100%,960px);margin:0 auto;padding:16px;box-sizing:border-box;">
+<div style="border:2px solid var(--p);border-radius:var(--r);padding:20px;margin-bottom:20px;background:var(--p10);">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+    <h2 style="margin:0;letter-spacing:4px;font-size:clamp(14px,3vw,20px);">&#128737; SECURITY HUB</h2>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span id="secTarget" style="font-size:10px;opacity:.5;"></span>
+      <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 18px;font-size:11px;">&#9654; SCAN NOW</button>
+    </div>
+  </div>
+  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;">
+    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">PAGES SCANNED</div>
+      <div id="secPages" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secSSLCard">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">SSL CERT</div>
+      <div id="secSSL" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+      <div id="secSSLSub" style="font-size:9px;opacity:.5;margin-top:3px;"></div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secBrokenCard">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">BROKEN LINKS</div>
+      <div id="secBroken" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secHarmfulCard">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">HARMFUL CONTENT</div>
+      <div id="secHarmful" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">CHANGES</div>
+      <div id="secChanges" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+    </div>
+  </div>
+  <div style="border:1px solid var(--p30);border-radius:8px;padding:14px;margin-bottom:14px;">
+    <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9672; AI ANALYSIS</div>
+    <div id="secAI" style="font-size:12px;line-height:1.7;font-family:'Courier New',monospace;white-space:pre-wrap;opacity:.85;">Awaiting scan data...</div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128279; BROKEN LINKS</div>
+      <div id="secBrokenList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
+    </div>
+    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9888; HARMFUL CONTENT</div>
+      <div id="secHarmfulList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
+    </div>
+    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128196; CONTENT CHANGES</div>
+      <div id="secChangesList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
+    </div>
+    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128200; SCAN HISTORY</div>
+      <div id="secHistoryBar" style="display:flex;align-items:flex-end;gap:3px;height:60px;"></div>
+    </div>
+  </div>
+  <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; AUTO-SCAN EVERY <span id="secInterval">—</span> MIN</div>
+</div></div>
+<script>
+async function secLoad(){
+  const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
+  if(s.ok){document.getElementById('secTarget').textContent=s.target||'';document.getElementById('secInterval').textContent=s.interval||'?';}
+  const d=await fetch('/api/security/reports').then(r=>r.json()).catch(()=>({}));
+  if(!d.ok||!d.reports.length){document.getElementById('secAI').textContent='No scans yet. Click SCAN NOW.';return;}
+  const r=d.reports[0];
+  // alert mode
+  const crit=r.is_critical;
+  const banner=document.getElementById('secAlertBanner');
+  if(crit){
+    banner.style.display='block';
+    document.body.style.setProperty('--p','#ff2222');
+    document.body.style.setProperty('--bg','#0a0000');
+    document.body.style.setProperty('--ac','#330000');
+  }else{banner.style.display='none';}
+  document.getElementById('secPages').textContent=r.pages_scanned??'—';
+  const sslOk=r.ssl?.ok;const sslDays=r.ssl?.days_left??'?';
+  document.getElementById('secSSL').textContent=sslOk?sslDays+'d':'⚠';
+  document.getElementById('secSSL').style.color=sslOk?'var(--p)':'#ff3355';
+  document.getElementById('secSSLSub').textContent=sslOk?`expires in ${sslDays} days`:'CERTIFICATE ISSUE';
+  const bl=r.broken_links?.length??0;
+  document.getElementById('secBroken').textContent=bl;
+  document.getElementById('secBroken').style.color=bl>0?'#ffaa00':'var(--p)';
+  const hm=r.harmful_content?.length??0;
+  document.getElementById('secHarmful').textContent=hm;
+  document.getElementById('secHarmful').style.color=hm>0?'#ff3355':'var(--p)';
+  const ch=r.content_changes?.length??0;
+  document.getElementById('secChanges').textContent=ch;
+  document.getElementById('secChanges').style.color=ch>0?'#ffaa00':'var(--p)';
+  document.getElementById('secAI').textContent=r.ai_analysis||'No analysis.';
+  document.getElementById('secLastScan').textContent=r.timestamp?new Date(r.timestamp).toLocaleString():'—';
+  // lists
+  const bll=document.getElementById('secBrokenList');
+  bll.innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
+  const hml=document.getElementById('secHarmfulList');
+  hml.innerHTML=hm?r.harmful_content.map(h=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ff3355;">⚠</span> ${h.url}<br><span style="opacity:.5;font-size:9px;">${h.keywords.join(', ')}</span></div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
+  const chl=document.getElementById('secChangesList');
+  chl.innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
+  // history bar
+  const bar=document.getElementById('secHistoryBar');bar.innerHTML='';
+  d.reports.slice(0,30).reverse().forEach(rpt=>{
+    const issues=(rpt.broken_links?.length??0)+(rpt.harmful_content?.length??0)*3+(!rpt.ssl?.ok?5:0);
+    const h=Math.max(4,Math.min(52,4+issues*3));
+    const col=rpt.harmful_content?.length>0?'#ff3355':issues>3?'#ffaa00':'var(--p)';
+    bar.innerHTML+=`<div title="${new Date(rpt.timestamp).toLocaleString()} — ${issues} issues" style="flex:1;min-width:6px;height:${h}px;background:${col};border-radius:2px 2px 0 0;align-self:flex-end;cursor:pointer;"></div>`;
+  });
+}
+async function secTriggerScan(){
+  const btn=document.getElementById('secScanBtn');
+  btn.disabled=true;btn.textContent='⟳ SCANNING...';
+  await fetch('/api/security/scan',{method:'POST'});
+  const poll=setInterval(async()=>{
+    const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
+    if(!s.scanning){clearInterval(poll);secLoad();btn.disabled=false;btn.textContent='▶ SCAN NOW';}
+  },3000);
+}
+secLoad();setInterval(secLoad,30000);
+</script>'''
+    return shell(content,user=user,theme=theme)
+
 if __name__=="__main__": app.run(debug=False)
