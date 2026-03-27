@@ -5,7 +5,10 @@ from contextlib import contextmanager
 from cryptography.fernet import Fernet
 # ── Security Scanner ──────────────────────────────────────────────────────────
 import ssl,socket,threading,urllib.parse
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup=None
 try:
     from anthropic import Anthropic as _Anthropic
     _anthropic_client=_Anthropic()
@@ -1235,11 +1238,12 @@ def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
             # Only scan pages that the public can actually see (not login-walled content)
             if r.status_code==200:
                 visited.append(url)
-                soup=BeautifulSoup(r.text,"html.parser")
-                for a in soup.find_all("a",href=True):
-                    full=urllib.parse.urljoin(url,a["href"])
-                    if urllib.parse.urlparse(full).netloc==domain and full not in seen and not _sec_skip(full):
-                        queue.append(full)
+                if BeautifulSoup:
+                    soup=BeautifulSoup(r.text,"html.parser")
+                    for a in soup.find_all("a",href=True):
+                        full=urllib.parse.urljoin(url,a["href"])
+                        if urllib.parse.urlparse(full).netloc==domain and full not in seen and not _sec_skip(full):
+                            queue.append(full)
         except Exception: seen.add(url)
     return visited
 
@@ -1284,6 +1288,7 @@ def _sec_harmful(pages):
             r=requests.get(url,timeout=8,headers={"User-Agent":"VoxSecBot/1.0"})
             if r.status_code!=200: continue
             # Strip HTML tags so we only check visible text, not source code/CSS/JS
+            if not BeautifulSoup: continue
             soup=BeautifulSoup(r.text,"html.parser")
             for tag in soup(["script","style","code","pre"]): tag.decompose()
             visible_text=soup.get_text(separator=" ").lower()
