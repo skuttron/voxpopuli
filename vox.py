@@ -21,6 +21,7 @@ app.config['SESSION_PERMANENT']=True
 # FIX 1: Added SameSite + HttpOnly so sessions persist properly across gunicorn workers
 app.config['SESSION_COOKIE_SAMESITE']='Lax'
 app.config['SESSION_COOKIE_HTTPONLY']=True
+app.config['SESSION_COOKIE_SECURE']=True  # FIX 2: Required for HTTPS (Railway) — prevents session loss
 def get_database_url():
     url=os.environ.get("DATABASE_URL","")
     if not url: raise RuntimeError("DATABASE_URL not set.")
@@ -332,7 +333,8 @@ let regThemeVal='green',onlineUsers=new Set();
 let _prevNotif={{dm:-1,group:-1,private:-1,posts:-1,groups:{{}},private_rooms:{{}}}};
 let _notifReady=false,_notifPermission=false;
 const IS_ADMIN={str(admin).lower()};
-const api=(url,body)=>fetch(url,body?{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}}:undefined).then(r=>r.json());
+const api=async(url,body)=>{{try{{const r=await fetch(url,body?{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}}:undefined);if(r.status===401||r.redirected||r.url.includes('/login')){{location.reload();return{{ok:false,error:'SESSION_EXPIRED'}};}}const ct=r.headers.get('content-type')||'';if(!ct.includes('json'))return{{ok:false,error:'NOT_JSON'}};return await r.json();}}catch(e){{return{{ok:false,error:String(e)}};}}}};
+
 const $=id=>document.getElementById(id);
 const isMobile=()=>window.innerWidth<=700;
 const openModal=id=>{{const el=$(id);if(el)el.classList.add('open');}};
@@ -1311,7 +1313,9 @@ def _sec_harmful(pages):
     return findings
 
 def _sec_ai_analysis(report):
-    if not _anthropic_client: return "Claude API not configured."
+    if not _anthropic_client: return "AI analysis unavailable — set ANTHROPIC_API_KEY in Railway environment variables."
+    api_key=os.environ.get("ANTHROPIC_API_KEY","")
+    if not api_key: return "AI analysis unavailable — ANTHROPIC_API_KEY not set."
     try:
         msg=_anthropic_client.messages.create(
             model="claude-haiku-4-5-20251001",max_tokens=600,
@@ -1408,7 +1412,10 @@ def security_dashboard():
     content='''<div style="width:min(100%,960px);margin:0 auto;padding:16px;box-sizing:border-box;">
 <div style="border:2px solid var(--p);border-radius:var(--r);padding:20px;margin-bottom:20px;background:var(--p10);">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
-    <h2 style="margin:0;letter-spacing:4px;font-size:clamp(14px,3vw,20px);">&#128737; SECURITY HUB</h2>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <a href="/" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 12px;color:var(--p);background:var(--p10);font-family:'Courier New',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;transition:.2s;" onmouseover="this.style.background='var(--p)';this.style.color='#000'" onmouseout="this.style.background='var(--p10)';this.style.color='var(--p)'">&#9664; BACK</a>
+      <h2 style="margin:0;letter-spacing:4px;font-size:clamp(14px,3vw,20px);">&#128737; SECURITY HUB</h2>
+    </div>
     <div style="display:flex;gap:8px;align-items:center;">
       <span id="secTarget" style="font-size:10px;opacity:.5;"></span>
       <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 18px;font-size:11px;">&#9654; SCAN NOW</button>
