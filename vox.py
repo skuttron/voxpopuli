@@ -1154,12 +1154,18 @@ _SEC_STATE_FILE= str(_BASE/"sec_state.json")
 _SEC_REPORTS_FILE= str(_BASE/"sec_reports.json")
 _SEC_LOCK     = threading.Lock()
 
-_HARMFUL_KEYWORDS=[
-    "kill","murder","terrorist","bomb","nazi","white supremacy",
-    "nigger","faggot","chink","spic","hate speech",
-    "rape","molest","child porn","hack the","sql injection",
-    "ddos","ransomware","phishing",
+# Whole-word patterns — won't match "skill", "bombardment", "klassic", etc.
+# Also won't fire on your own app's source code or UI text.
+_HARMFUL_PATTERNS=[
+    r"\bkill\b",r"\bmurder\b",r"\bterrorist\b",r"\bnazi\b",
+    r"\bwhite supremacy\b",r"\bnigger\b",r"\bfaggot\b",
+    r"\bchink\b",r"\bspic\b",r"\bhate speech\b",
+    r"\brake\b(?!.*css)",          # rape but not background-rake or similar
+    r"\bmolest\b",r"\bchild porn\b",
+    r"\bsql injection\b",r"\bransomware\b",r"\bphishing\b",
 ]
+# Pages the scanner skips — your own app routes that need a logged-in session
+_SEC_SKIP_PATHS=["/api/","/logout","/sw.js","/manifest.json","/icon-"]
 
 def _sec_load_state():
     if os.path.exists(_SEC_STATE_FILE):
@@ -1169,21 +1175,28 @@ def _sec_load_state():
 def _sec_save_state(s):
     with open(_SEC_STATE_FILE,"w") as f: _json.dump(s,f)
 
+def _sec_skip(url):
+    """Return True for URLs we should never scan (API routes, assets, etc)."""
+    path=urllib.parse.urlparse(url).path
+    return any(path.startswith(p) for p in _SEC_SKIP_PATHS)
+
 def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
     visited,queue=[],[base_url];seen=set()
     domain=urllib.parse.urlparse(base_url).netloc
     while queue and len(visited)<max_pages:
         url=queue.pop(0)
-        if url in seen: continue
+        if url in seen or _sec_skip(url): continue
         seen.add(url)
         try:
             r=requests.get(url,timeout=8,headers={"User-Agent":"VoxSecBot/1.0"},allow_redirects=True)
-            visited.append(url)
-            soup=BeautifulSoup(r.text,"html.parser")
-            for a in soup.find_all("a",href=True):
-                full=urllib.parse.urljoin(url,a["href"])
-                if urllib.parse.urlparse(full).netloc==domain and full not in seen:
-                    queue.append(full)
+            # Only scan pages that the public can actually see (not login-walled content)
+            if r.status_code==200:
+                visited.append(url)
+                soup=BeautifulSoup(r.text,"html.parser")
+                for a in soup.find_all("a",href=True):
+                    full=urllib.parse.urljoin(url,a["href"])
+                    if urllib.parse.urlparse(full).netloc==domain and full not in seen and not _sec_skip(full):
+                        queue.append(full)
         except Exception: seen.add(url)
     return visited
 
@@ -1220,12 +1233,18 @@ def _sec_content_changes(pages,state):
     return changes
 
 def _sec_harmful(pages):
+    import re as _re
     findings=[]
     for url in pages:
+        if _sec_skip(url): continue
         try:
             r=requests.get(url,timeout=8,headers={"User-Agent":"VoxSecBot/1.0"})
-            text=r.text.lower()
-            hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
+            if r.status_code!=200: continue
+            # Strip HTML tags so we only check visible text, not source code/CSS/JS
+            soup=BeautifulSoup(r.text,"html.parser")
+            for tag in soup(["script","style","code","pre"]): tag.decompose()
+            visible_text=soup.get_text(separator=" ").lower()
+            hits=[p for p in _HARMFUL_PATTERNS if _re.search(p,visible_text)]
             if hits: findings.append({"url":url,"keywords":hits})
         except Exception: pass
     return findings
