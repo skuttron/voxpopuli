@@ -1271,15 +1271,6 @@ def _sec_harmful(pages,sess):
                 text=content.lower()
                 hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
                 if hits: findings.append({"source":"post","url":"Board Post","keywords":hits,"username":uname,"message":content,"timestamp":str(ts)})
-            # DMs
-            for row in fetchall(con,"SELECT sender,recipient,content_enc,timestamp FROM messages"):
-                sender,recipient,enc_content,ts=row
-                try:
-                    content=dec(enc_content)
-                    text=content.lower()
-                    hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
-                    if hits: findings.append({"source":"dm","url":f"DM: {sender} → {recipient}","keywords":hits,"username":sender,"message":content,"timestamp":str(ts)})
-                except Exception: pass
             # group messages
             for row in fetchall(con,"SELECT gm.sender,g.name,gm.content_enc,gm.timestamp FROM group_messages gm JOIN groups g ON gm.group_id=g.id"):
                 sender,gname,enc_content,ts=row
@@ -1288,15 +1279,6 @@ def _sec_harmful(pages,sess):
                     text=content.lower()
                     hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
                     if hits: findings.append({"source":"channel","url":f"#{gname}","keywords":hits,"username":sender,"message":content,"timestamp":str(ts)})
-                except Exception: pass
-            # private room messages
-            for row in fetchall(con,"SELECT prm.sender,pr.name,prm.content_enc,prm.timestamp FROM private_room_messages prm JOIN private_rooms pr ON prm.room_id=pr.id"):
-                sender,rname,enc_content,ts=row
-                try:
-                    content=dec(enc_content)
-                    text=content.lower()
-                    hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
-                    if hits: findings.append({"source":"private","url":f"🔒 {rname}","keywords":hits,"username":sender,"message":content,"timestamp":str(ts)})
                 except Exception: pass
     except Exception as e:
         app.logger.warning(f"SecBot DB scan error: {e}")
