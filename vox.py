@@ -1487,7 +1487,7 @@ def security_dashboard():
 </div></div>
 
 <script>
-let _secInterval=120,_secNextScan=null,_secCountdownTimer=null;
+let _secInterval=120,_secNextScan=null,_secCountdownTimer=null,_secAllReports=[];
 
 function secStartCountdown(){
   if(_secCountdownTimer) clearInterval(_secCountdownTimer);
@@ -1500,20 +1500,10 @@ function secStartCountdown(){
   },1000);
 }
 
-async function secLoad(){
-  const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
-  if(s.ok){
-    _secInterval=s.interval||120;
-    _secNextScan=s.next_scan||null;
-    document.getElementById('secInterval').textContent=s.interval||'?';
-    secStartCountdown();
-  }
-  const d=await fetch('/api/security/reports').then(r=>r.json()).catch(()=>({}));
-  if(!d.ok||!d.reports.length){document.getElementById('secAI').textContent='No scans yet. Click SCAN NOW.';return;}
-  const r=d.reports[0];
+function secRender(r,isLatest=true){
   const crit=r.is_critical;
   const banner=document.getElementById('secAlertBanner');
-  if(crit){banner.style.display='block';document.body.style.setProperty('--p','#ff2222');document.body.style.setProperty('--bg','#0a0000');document.body.style.setProperty('--ac','#330000');}
+  if(crit&&isLatest){banner.style.display='block';document.body.style.setProperty('--p','#ff2222');document.body.style.setProperty('--bg','#0a0000');document.body.style.setProperty('--ac','#330000');}
   else{banner.style.display='none';}
   document.getElementById('secPages').textContent=r.pages_scanned??'—';
   const sslOk=r.ssl?.ok;const sslDays=r.ssl?.days_left??'?';
@@ -1530,11 +1520,9 @@ async function secLoad(){
   document.getElementById('secChanges').textContent=ch;
   document.getElementById('secChanges').style.color=ch>0?'#ffaa00':'var(--p)';
   document.getElementById('secAI').textContent=r.ai_analysis||'No analysis.';
-  document.getElementById('secLastScan').textContent=r.timestamp?new Date(r.timestamp).toLocaleString():'—';
-  const bll=document.getElementById('secBrokenList');
-  bll.innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
-  const hml=document.getElementById('secHarmfulList');
-  hml.innerHTML=hm?r.harmful_content.map(h=>`
+  document.getElementById('secLastScan').textContent=r.timestamp?(isLatest?'':'\u25C4 ')+new Date(r.timestamp).toLocaleString():'—';
+  document.getElementById('secBrokenList').innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
+  document.getElementById('secHarmfulList').innerHTML=hm?r.harmful_content.map(h=>`
     <div style="padding:8px;margin-bottom:6px;border:1px solid #ff3355;border-radius:6px;background:#1a0005;">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;margin-bottom:4px;">
         <span style="color:#ff3355;font-size:11px;font-weight:bold;">⚠ ${h.source?.toUpperCase()||'PAGE'} — ${h.url}</span>
@@ -1544,15 +1532,36 @@ async function secLoad(){
       ${h.message?`<div style="font-size:11px;background:#0a0000;border-radius:4px;padding:5px 8px;margin-bottom:4px;word-break:break-word;opacity:.9;">"${h.message}"</div>`:''}
       <div style="font-size:9px;color:#ff3355;letter-spacing:1px;">KEYWORDS: ${h.keywords.join(', ')}</div>
     </div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
-  const chl=document.getElementById('secChangesList');
-  chl.innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
+  document.getElementById('secChangesList').innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
+}
+
+function secRenderHistory(activeIdx){
   const bar=document.getElementById('secHistoryBar');bar.innerHTML='';
-  d.reports.slice(0,30).reverse().forEach(rpt=>{
+  _secAllReports.slice(0,30).reverse().forEach((rpt,i)=>{
+    const realIdx=Math.min(29,_secAllReports.length-1)-i;
     const issues=(rpt.broken_links?.length??0)+(rpt.harmful_content?.length??0)*3+(!rpt.ssl?.ok?5:0);
     const h=Math.max(4,Math.min(42,4+issues*3));
     const col=rpt.harmful_content?.length>0?'#ff3355':issues>3?'#ffaa00':'var(--p)';
-    bar.innerHTML+=`<div title="${new Date(rpt.timestamp).toLocaleString()} — ${issues} issues" style="flex:1;min-width:6px;height:${h}px;background:${col};border-radius:2px 2px 0 0;align-self:flex-end;cursor:pointer;"></div>`;
+    const active=realIdx===activeIdx;
+    bar.innerHTML+=`<div onclick="secRender(_secAllReports[${realIdx}],${realIdx===0});secRenderHistory(${realIdx});"
+      title="${new Date(rpt.timestamp).toLocaleString()} — ${issues} issues"
+      style="flex:1;min-width:6px;height:${h}px;background:${col};border-radius:2px 2px 0 0;align-self:flex-end;cursor:pointer;opacity:${active?1:0.45};outline:${active?'2px solid #fff':'none'};transition:.15s;"></div>`;
   });
+}
+
+async function secLoad(){
+  const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
+  if(s.ok){
+    _secInterval=s.interval||120;
+    _secNextScan=s.next_scan||null;
+    document.getElementById('secInterval').textContent=s.interval||'?';
+    secStartCountdown();
+  }
+  const d=await fetch('/api/security/reports').then(r=>r.json()).catch(()=>({}));
+  if(!d.ok||!d.reports.length){document.getElementById('secAI').textContent='No scans yet. Click SCAN NOW.';return;}
+  _secAllReports=d.reports;
+  secRender(_secAllReports[0],true);
+  secRenderHistory(0);
 }
 async function secTriggerScan(){
   const btn=document.getElementById('secScanBtn');
