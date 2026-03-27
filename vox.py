@@ -1406,52 +1406,65 @@ def api_sec_status():
 def security_dashboard():
     if not is_admin(): return redirect("/")
     user=me();theme=session.get("theme","green")
-    content='''<div style="width:min(100%,960px);margin:0 auto;padding:16px;box-sizing:border-box;">
-<div style="border:2px solid var(--p);border-radius:var(--r);padding:20px;margin-bottom:20px;background:var(--p10);">
-  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
-    <h2 style="margin:0;letter-spacing:4px;font-size:clamp(14px,3vw,20px);">&#128737; SECURITY HUB</h2>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <a href="/" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 14px;color:var(--p);background:var(--p10);font-family:'Courier New',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;" onmouseover="this.style.background='var(--p)';this.style.color='#000'" onmouseout="this.style.background='var(--p10)';this.style.color='var(--p)'">&#8962; HOME</a>
-      <span id="secTarget" style="font-size:10px;opacity:.5;"></span>
-      <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 18px;font-size:11px;">&#9654; SCAN NOW</button>
+    content='''<div style="width:100%;max-width:960px;margin:0 auto;padding:10px;box-sizing:border-box;">
+<div style="border:2px solid var(--p);border-radius:var(--r);padding:14px;background:var(--p10);">
+
+  <!-- HEADER -->
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <a href="/" style="display:inline-flex;align-items:center;gap:4px;border:2px solid var(--p);border-radius:8px;padding:5px 12px;color:var(--p);background:var(--p10);font-family:\'Courier New\',monospace;font-size:11px;font-weight:bold;text-decoration:none;" onmouseover="this.style.background=\'var(--p)\';this.style.color=\'#000\'" onmouseout="this.style.background=\'var(--p10)\';this.style.color=\'var(--p)\'">&#8962; HOME</a>
+      <h2 style="margin:0;letter-spacing:3px;font-size:clamp(13px,2.5vw,18px);">&#128737; SECURITY HUB</h2>
+    </div>
+    <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 16px;font-size:11px;">&#9654; SCAN NOW</button>
+  </div>
+
+  <!-- ALERT BANNER -->
+  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px;border-radius:8px;text-align:center;font-size:11px;letter-spacing:2px;margin-bottom:12px;animation:tcPulse 1.5s infinite;">&#9888; CRITICAL SECURITY ISSUES DETECTED &#9888;</div>
+
+  <!-- STAT CARDS -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;">
+    <div style="border:1px solid var(--p);border-radius:8px;padding:10px;text-align:center;">
+      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">PAGES</div>
+      <div id="secPages" style="font-size:22px;font-family:\'Courier New\',monospace;">—</div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:10px;text-align:center;">
+      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">SSL CERT</div>
+      <div id="secSSL" style="font-size:22px;font-family:\'Courier New\',monospace;">—</div>
+      <div id="secSSLSub" style="font-size:8px;opacity:.5;margin-top:2px;"></div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:10px;text-align:center;">
+      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">BROKEN</div>
+      <div id="secBroken" style="font-size:22px;font-family:\'Courier New\',monospace;">—</div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:10px;text-align:center;">
+      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">HARMFUL</div>
+      <div id="secHarmful" style="font-size:22px;font-family:\'Courier New\',monospace;">—</div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:10px;text-align:center;">
+      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">CHANGES</div>
+      <div id="secChanges" style="font-size:22px;font-family:\'Courier New\',monospace;">—</div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:10px;text-align:center;">
+      <div style="font-size:8px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">NEXT SCAN</div>
+      <div id="secCountdown" style="font-size:16px;font-family:\'Courier New\',monospace;">—</div>
     </div>
   </div>
-  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;</div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;">
-    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">PAGES SCANNED</div>
-      <div id="secPages" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
-    </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secSSLCard">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">SSL CERT</div>
-      <div id="secSSL" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
-      <div id="secSSLSub" style="font-size:9px;opacity:.5;margin-top:3px;"></div>
-    </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secBrokenCard">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">BROKEN LINKS</div>
-      <div id="secBroken" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
-    </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secHarmfulCard">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">HARMFUL CONTENT</div>
-      <div id="secHarmful" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
-    </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">CHANGES</div>
-      <div id="secChanges" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
-    </div>
-  </div>
-  <div style="border:1px solid var(--p30);border-radius:8px;padding:14px;margin-bottom:14px;">
+
+  <!-- AI ANALYSIS -->
+  <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;margin-bottom:12px;">
     <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9672; AI ANALYSIS</div>
-    <div id="secAI" style="font-size:12px;line-height:1.7;font-family:'Courier New',monospace;white-space:pre-wrap;opacity:.85;">Awaiting scan data...</div>
+    <div id="secAI" style="font-size:11px;line-height:1.6;font-family:\'Courier New\',monospace;white-space:pre-wrap;overflow-x:auto;word-break:break-word;opacity:.85;">Awaiting scan data...</div>
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+
+  <!-- DETAIL PANELS -->
+  <div style="display:grid;grid-template-columns:1fr;gap:8px;">
+    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9888; HARMFUL CONTENT</div>
+      <div id="secHarmfulList" style="font-size:11px;max-height:200px;overflow-y:auto;"></div>
+    </div>
     <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128279; BROKEN LINKS</div>
       <div id="secBrokenList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
-    </div>
-    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9888; HARMFUL CONTENT</div>
-      <div id="secHarmfulList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
     </div>
     <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128196; CONTENT CHANGES</div>
@@ -1459,32 +1472,51 @@ def security_dashboard():
     </div>
     <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128200; SCAN HISTORY</div>
-      <div id="secHistoryBar" style="display:flex;align-items:flex-end;gap:3px;height:60px;"></div>
+      <div id="secHistoryBar" style="display:flex;align-items:flex-end;gap:3px;height:50px;"></div>
     </div>
   </div>
-  <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; AUTO-SCAN EVERY <span id="secInterval">—</span> MIN</div>
+
+  <!-- FOOTER -->
+  <div style="margin-top:10px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">
+    LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; EVERY <span id="secInterval">—</span> MIN
+  </div>
 </div></div>
+
 <script>
+let _secInterval=120,_secLastScan=null,_secCountdownTimer=null;
+
+function secStartCountdown(){
+  if(_secCountdownTimer) clearInterval(_secCountdownTimer);
+  _secCountdownTimer=setInterval(()=>{
+    if(!_secLastScan){document.getElementById('secCountdown').textContent='—';return;}
+    const next=new Date(_secLastScan).getTime()+_secInterval*60*1000;
+    const diff=Math.max(0,Math.floor((next-Date.now())/1000));
+    const h=Math.floor(diff/3600),m=Math.floor((diff%3600)/60),s=diff%60;
+    const fmt=v=>String(v).padStart(2,'0');
+    document.getElementById('secCountdown').textContent=h>0?`${fmt(h)}:${fmt(m)}:${fmt(s)}`:`${fmt(m)}:${fmt(s)}`;
+  },1000);
+}
+
 async function secLoad(){
   const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
-  if(s.ok){document.getElementById('secTarget').textContent=s.target||'';document.getElementById('secInterval').textContent=s.interval||'?';}
+  if(s.ok){
+    _secInterval=s.interval||120;
+    _secLastScan=s.last_scan||null;
+    document.getElementById('secInterval').textContent=s.interval||'?';
+    secStartCountdown();
+  }
   const d=await fetch('/api/security/reports').then(r=>r.json()).catch(()=>({}));
   if(!d.ok||!d.reports.length){document.getElementById('secAI').textContent='No scans yet. Click SCAN NOW.';return;}
   const r=d.reports[0];
-  // alert mode
   const crit=r.is_critical;
   const banner=document.getElementById('secAlertBanner');
-  if(crit){
-    banner.style.display='block';
-    document.body.style.setProperty('--p','#ff2222');
-    document.body.style.setProperty('--bg','#0a0000');
-    document.body.style.setProperty('--ac','#330000');
-  }else{banner.style.display='none';}
+  if(crit){banner.style.display='block';document.body.style.setProperty('--p','#ff2222');document.body.style.setProperty('--bg','#0a0000');document.body.style.setProperty('--ac','#330000');}
+  else{banner.style.display='none';}
   document.getElementById('secPages').textContent=r.pages_scanned??'—';
   const sslOk=r.ssl?.ok;const sslDays=r.ssl?.days_left??'?';
   document.getElementById('secSSL').textContent=sslOk?sslDays+'d':'⚠';
   document.getElementById('secSSL').style.color=sslOk?'var(--p)':'#ff3355';
-  document.getElementById('secSSLSub').textContent=sslOk?`expires in ${sslDays} days`:'CERTIFICATE ISSUE';
+  document.getElementById('secSSLSub').textContent=sslOk?`${sslDays}d left`:'ISSUE';
   const bl=r.broken_links?.length??0;
   document.getElementById('secBroken').textContent=bl;
   document.getElementById('secBroken').style.color=bl>0?'#ffaa00':'var(--p)';
@@ -1496,7 +1528,7 @@ async function secLoad(){
   document.getElementById('secChanges').style.color=ch>0?'#ffaa00':'var(--p)';
   document.getElementById('secAI').textContent=r.ai_analysis||'No analysis.';
   document.getElementById('secLastScan').textContent=r.timestamp?new Date(r.timestamp).toLocaleString():'—';
-  // lists
+  if(r.timestamp){_secLastScan=r.timestamp;secStartCountdown();}
   const bll=document.getElementById('secBrokenList');
   bll.innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const hml=document.getElementById('secHarmfulList');
@@ -1512,11 +1544,10 @@ async function secLoad(){
     </div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const chl=document.getElementById('secChangesList');
   chl.innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
-  // history bar
   const bar=document.getElementById('secHistoryBar');bar.innerHTML='';
   d.reports.slice(0,30).reverse().forEach(rpt=>{
     const issues=(rpt.broken_links?.length??0)+(rpt.harmful_content?.length??0)*3+(!rpt.ssl?.ok?5:0);
-    const h=Math.max(4,Math.min(52,4+issues*3));
+    const h=Math.max(4,Math.min(42,4+issues*3));
     const col=rpt.harmful_content?.length>0?'#ff3355':issues>3?'#ffaa00':'var(--p)';
     bar.innerHTML+=`<div title="${new Date(rpt.timestamp).toLocaleString()} — ${issues} issues" style="flex:1;min-width:6px;height:${h}px;background:${col};border-radius:2px 2px 0 0;align-self:flex-end;cursor:pointer;"></div>`;
   });
