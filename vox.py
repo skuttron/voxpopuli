@@ -1185,9 +1185,25 @@ def _sec_get_session():
         app.logger.warning(f"SecBot login failed: {e}")
     return s
 
+_SEC_KNOWN_ROUTES=[
+    "/","/security",
+    "/api/traffic/public",
+    "/api/news","/api/news?type=world","/api/news?type=usnews","/api/news?type=epstein",
+    "/api/dm/conversations","/api/dm/thread",
+    "/api/groups","/api/online",
+    "/api/notifications",
+    "/api/posts",
+    "/api/private/rooms",
+    "/manifest.json","/sw.js",
+    "/icon-192.png","/icon-512.png",
+]
+
 def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
     sess=_sec_get_session()
-    visited,queue=[],[base_url];seen=set()
+    base=base_url.rstrip("/")
+    # seed with known routes so JS-rendered pages are always covered
+    seed=[base+r for r in _SEC_KNOWN_ROUTES]+[base_url]
+    visited,queue=[],seed;seen=set()
     domain=urllib.parse.urlparse(base_url).netloc
     while queue and len(visited)<max_pages:
         url=queue.pop(0)
@@ -1374,6 +1390,7 @@ def security_dashboard():
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
     <h2 style="margin:0;letter-spacing:4px;font-size:clamp(14px,3vw,20px);">&#128737; SECURITY HUB</h2>
     <div style="display:flex;gap:8px;align-items:center;">
+      <a href="/" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 14px;color:var(--p);background:var(--p10);font-family:'Courier New',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;" onmouseover="this.style.background='var(--p)';this.style.color='#000'" onmouseout="this.style.background='var(--p10)';this.style.color='var(--p)'">&#8962; HOME</a>
       <span id="secTarget" style="font-size:10px;opacity:.5;"></span>
       <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 18px;font-size:11px;">&#9654; SCAN NOW</button>
     </div>
