@@ -438,9 +438,7 @@ if($('dmConvList')){{['tabContentDM','tabContentGroup','tabContentPrivate','tabC
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="VOX">
 <link rel="apple-touch-icon" href="/icon-192.png">
-<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');
-// Force reload if cached version is stale
-if('caches' in window){caches.keys().then(keys=>keys.forEach(k=>caches.delete(k)));}</script>
+<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 <style>{theme_css(theme)}</style>
 </head><body>
 <div class="crt-overlay"></div><div class="scanline-a"></div><div class="scanline-b"></div><div class="scanline-c"></div>
