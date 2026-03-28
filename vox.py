@@ -1186,37 +1186,35 @@ def _sec_get_session():
     return s
 
 _SEC_KNOWN_ROUTES=[
-    "/","/security",
+    "/",
     "/api/traffic/public",
-    "/api/news","/api/news?type=world","/api/news?type=usnews","/api/news?type=epstein",
-    "/api/dm/conversations","/api/dm/thread",
-    "/api/groups","/api/online",
-    "/api/notifications",
+    "/api/groups",
     "/api/posts",
-    "/api/private/rooms",
-    "/manifest.json","/sw.js",
-    "/icon-192.png","/icon-512.png",
 ]
 
 def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
     sess=_sec_get_session()
     base=base_url.rstrip("/")
     # seed with known routes so JS-rendered pages are always covered
-    seed=[base+r for r in _SEC_KNOWN_ROUTES]+[base_url]
+    seed=[base+r for r in _SEC_KNOWN_ROUTES]+[base_url.rstrip("/")]
     visited,queue=[],seed;seen=set()
     domain=urllib.parse.urlparse(base_url).netloc
+    _skip=['/api/news','/api/dm','/api/groups','/api/posts','/api/private','/api/notifications','/api/online','/api/traffic']
     while queue and len(visited)<max_pages:
         url=queue.pop(0)
         if url in seen: continue
         seen.add(url)
+        if any(s in url for s in _skip): seen.add(url);visited.append(url);continue
         try:
             r=sess.get(url,timeout=8,allow_redirects=True)
             visited.append(url)
             soup=BeautifulSoup(r.text,"html.parser")
             for a in soup.find_all("a",href=True):
                 full=urllib.parse.urljoin(url,a["href"])
-                if urllib.parse.urlparse(full).netloc==domain and full not in seen:
+                parsed=urllib.parse.urlparse(full)
+                if parsed.netloc==domain and full not in seen and not any(s in full for s in _skip):
                     queue.append(full)
+            time.sleep(2)
         except Exception: seen.add(url)
     return visited,sess
 
@@ -1281,30 +1279,32 @@ def _sec_harmful(pages,sess):
                 except Exception: pass
     except Exception as e:
         app.logger.warning(f"SecBot DB scan error: {e}")
-    # 3. scan news feed headlines via API
-    try:
-        for feed_type in ["world","usnews"]:
-            r=sess.get((_SEC_TARGET or "").rstrip("/")+f"/api/news?type={feed_type}",timeout=10)
-            data=r.json() if r.ok else {}
-            for item in data.get("items",[]):
-                text=(item.get("title","")+" "+item.get("desc","")).lower()
-                hits=[kw for kw in _HARMFUL_KEYWORDS if re.search(r'\b'+re.escape(kw)+r'\b',text)]
-                if hits: findings.append({"source":"newsfeed","url":item.get("url","News Feed"),"keywords":hits,"username":"","message":item.get("title","")})
-    except Exception as e:
-        app.logger.warning(f"SecBot news scan error: {e}")
+    # 3. news feed scanning removed to preserve API quota
     return findings
 
-def _sec_ai_analysis(report):
+def _sec_ai_analysis(report, ai_only=None):
+    ssl=report.get("ssl",{})
+    broken=len(report.get("broken_links",[]))
+    harmful=report.get("harmful_content",[])[:5]
+    changes=len(report.get("content_changes",[]))
+    summary=(
+        f"Site: {report.get('target','')} | Pages: {report.get('pages_scanned',0)} | "
+        f"SSL ok: {ssl.get('ok')} days left: {ssl.get('days_left')} | "
+        f"Broken links: {broken} | Content changes: {changes} | "
+        f"Harmful content: {len(harmful)} items: {_json.dumps(harmful)[:1000]}"
+    )
     prompt=(
-        f"You are a security analyst. Analyze this scan and give:\n"
-        f"1. 2-sentence executive summary\n2. Critical issues needing immediate action\n"
-        f"3. Overall risk: LOW/MEDIUM/HIGH/CRITICAL\n\nData:\n{_json.dumps(report,indent=2)}"
+        f"You are a security analyst. Analyze this website scan summary and give:\n"
+        f"1. 2-sentence executive summary\n"
+        f"2. Critical issues needing immediate action\n"
+        f"3. Overall risk: LOW/MEDIUM/HIGH/CRITICAL\n\n"
+        f"Scan summary:\n{summary}"
     )
     claude_out=None
     gemini_out=None
 
     # ── Claude analysis ──────────────────────────────────────────────────────
-    if _anthropic_client:
+    if _anthropic_client and ai_only in (None,"claude"):
         try:
             msg=_anthropic_client.messages.create(
                 model="claude-opus-4-5",max_tokens=800,
@@ -1315,8 +1315,9 @@ def _sec_ai_analysis(report):
             claude_out=f"Claude error: {e}"
 
     # ── Gemini analysis ──────────────────────────────────────────────────────
-    gemini_key=os.environ.get("GEMINI_API_KEY","")
-    if gemini_key:
+    gemini_key=os.environ.get("GEMINI_API_KEY_SEC","")
+    if gemini_key and ai_only in (None,"gemini"):
+        time.sleep(5)
         try:
             payload=_json.dumps({"contents":[{"parts":[{"text":prompt}]}],
                 "generationConfig":{"maxOutputTokens":800,"temperature":0.4}}).encode()
@@ -1326,6 +1327,9 @@ def _sec_ai_analysis(report):
             with urllib.request.urlopen(req,timeout=20) as resp:
                 gdata=_json.loads(resp.read().decode())
             gemini_out=gdata["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except urllib.error.HTTPError as e:
+            body=e.read().decode()[:300]
+            gemini_out=f"Gemini error: HTTP {e.code} — {body}"
         except Exception as e:
             gemini_out=f"Gemini error: {e}"
 
@@ -1336,7 +1340,7 @@ def _sec_ai_analysis(report):
     if not parts:   return "No AI APIs configured (set ANTHROPIC_API_KEY and/or GEMINI_API_KEY)."
     return "\n\n─────────────────────────\n\n".join(parts)
 
-def _sec_run_scan():
+def _sec_run_scan(ai_only=None):
     if not _SEC_TARGET: return {"error":"TARGET_URL not set"}
     state=_sec_load_state()
     hostname=urllib.parse.urlparse(_SEC_TARGET).netloc
@@ -1347,10 +1351,10 @@ def _sec_run_scan():
     harmful=_sec_harmful(pages,sess)
     report={
         "timestamp":utc_now(),"target":_SEC_TARGET,
-        "pages_scanned":len(pages),"ssl":ssl_result,
+        "pages_scanned":len(pages),"pages_list":pages,"ssl":ssl_result,
         "broken_links":broken,"content_changes":changes,"harmful_content":harmful,
     }
-    report["ai_analysis"]=_sec_ai_analysis(report)
+    report["ai_analysis"]=_sec_ai_analysis(report,ai_only=ai_only)
     report["is_critical"]=bool(harmful or not ssl_result.get("ok") or len(broken)>5)
     # Notify admin via push if critical
     if report["is_critical"]:
@@ -1397,8 +1401,9 @@ def api_sec_reports():
 def api_sec_scan():
     if e:=require_admin(): return e
     if _SEC_LOCK.locked(): return err("SCAN ALREADY RUNNING")
+    ai_only=(request.json or {}).get("ai",None)
     def _run():
-        with _SEC_LOCK: _sec_run_scan()
+        with _SEC_LOCK: _sec_run_scan(ai_only=ai_only)
     threading.Thread(target=_run,daemon=True).start()
     return ok(status="started")
 
@@ -1424,6 +1429,8 @@ def security_dashboard():
       <a href="/" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 14px;color:var(--p);background:var(--p10);font-family:'Courier New',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;" onmouseover="this.style.background='var(--p)';this.style.color='#000'" onmouseout="this.style.background='var(--p10)';this.style.color='var(--p)'">&#8962; HOME</a>
       <span id="secTarget" style="font-size:10px;opacity:.5;"></span>
       <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 18px;font-size:11px;">&#9654; SCAN NOW</button>
+      <button class="btn-action" id="secScanClaude" onclick="secTriggerScan('claude')" style="padding:7px 14px;font-size:11px;border-color:#cc44ff;color:#cc44ff;">&#9654; CLAUDE</button>
+      <button class="btn-action" id="secScanGemini" onclick="secTriggerScan('gemini')" style="padding:7px 14px;font-size:11px;border-color:#4488ff;color:#4488ff;">&#9654; GEMINI</button>
       <button class="btn-action" id="secDismissBtn" onclick="secDismissAlert()" style="display:none;padding:7px 18px;font-size:11px;border-color:#ff3355;color:#ff3355;">&#10006; DISMISS ALERT</button>
     </div>
   </div>
@@ -1472,6 +1479,10 @@ def security_dashboard():
     <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128200; SCAN HISTORY</div>
       <div id="secHistoryBar" style="display:flex;align-items:flex-end;gap:3px;height:60px;"></div>
+    </div>
+    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;grid-column:span 2;">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128269; PAGES SCANNED</div>
+      <div id="secPagesList" style="font-size:10px;max-height:160px;overflow-y:auto;"></div>
     </div>
   </div>
   <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; NEXT SCAN: <span id="secNextScan">—</span> &nbsp;|&nbsp; INTERVAL: <span id="secInterval">—</span> MIN</div>
@@ -1551,13 +1562,22 @@ function secDismissAlert(){
   document.body.style.removeProperty('--bg');
   document.body.style.removeProperty('--ac');
 }
-async function secTriggerScan(){
-  const btn=document.getElementById('secScanBtn');
-  btn.disabled=true;btn.textContent='⟳ SCANNING...';
-  await fetch('/api/security/scan',{method:'POST'});
+async function secTriggerScan(ai){
+  const btns=['secScanBtn','secScanClaude','secScanGemini'];
+  btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=true;}});
+  const activeId=ai==='claude'?'secScanClaude':ai==='gemini'?'secScanGemini':'secScanBtn';
+  const activeBtn=document.getElementById(activeId);
+  if(activeBtn)activeBtn.textContent='⟳ SCANNING...';
+  await fetch('/api/security/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ai?{ai}:{})});
   const poll=setInterval(async()=>{
     const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
-    if(!s.scanning){clearInterval(poll);secLoad();btn.disabled=false;btn.textContent='▶ SCAN NOW';}
+    if(!s.scanning){
+      clearInterval(poll);secLoad();
+      btns.forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=false;});
+      document.getElementById('secScanBtn').textContent='▶ SCAN NOW';
+      document.getElementById('secScanClaude').textContent='▶ CLAUDE';
+      document.getElementById('secScanGemini').textContent='▶ GEMINI';
+    }
   },3000);
 }
 secLoad();setInterval(secLoad,30000);
