@@ -1254,14 +1254,44 @@ def _sec_content_changes(pages,state,sess):
 
 def _sec_harmful(pages,sess):
     findings=[]
-    # scan public pages only
+    # 1. scan public pages
     for url in pages:
         try:
             r=sess.get(url,timeout=8)
             text=r.text.lower()
-            hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
+            hits=[kw for kw in _HARMFUL_KEYWORDS if re.search(r'\b'+re.escape(kw)+r'\b',text)]
             if hits: findings.append({"source":"page","url":url,"keywords":hits,"username":"","message":""})
         except Exception: pass
+    # 2. scan DB: board posts
+    try:
+        with db() as con:
+            for row in fetchall(con,"SELECT username,content,created_at FROM posts"):
+                uname,content,ts=row
+                text=content.lower()
+                hits=[kw for kw in _HARMFUL_KEYWORDS if re.search(r'\b'+re.escape(kw)+r'\b',text)]
+                if hits: findings.append({"source":"post","url":"Community Board","keywords":hits,"username":uname,"message":content,"timestamp":str(ts)})
+            # group channel messages
+            for row in fetchall(con,"SELECT gm.sender,g.name,gm.content_enc,gm.timestamp FROM group_messages gm JOIN groups g ON gm.group_id=g.id ORDER BY gm.id DESC LIMIT 500"):
+                sender,gname,enc_content,ts=row
+                try:
+                    content=dec(enc_content)
+                    text=content.lower()
+                    hits=[kw for kw in _HARMFUL_KEYWORDS if re.search(r'\b'+re.escape(kw)+r'\b',text)]
+                    if hits: findings.append({"source":"channel","url":f"#{gname}","keywords":hits,"username":sender,"message":content,"timestamp":str(ts)})
+                except Exception: pass
+    except Exception as e:
+        app.logger.warning(f"SecBot DB scan error: {e}")
+    # 3. scan news feed headlines via API
+    try:
+        for feed_type in ["world","usnews"]:
+            r=sess.get((_SEC_TARGET or "").rstrip("/")+f"/api/news?type={feed_type}",timeout=10)
+            data=r.json() if r.ok else {}
+            for item in data.get("items",[]):
+                text=(item.get("title","")+" "+item.get("desc","")).lower()
+                hits=[kw for kw in _HARMFUL_KEYWORDS if re.search(r'\b'+re.escape(kw)+r'\b',text)]
+                if hits: findings.append({"source":"newsfeed","url":item.get("url","News Feed"),"keywords":hits,"username":"","message":item.get("title","")})
+    except Exception as e:
+        app.logger.warning(f"SecBot news scan error: {e}")
     return findings
 
 def _sec_ai_analysis(report):
@@ -1397,7 +1427,7 @@ def security_dashboard():
     </div>
   </div>
   <style>@media(max-width:600px){#secHeaderBtns{width:100%;justify-content:flex-start;}}</style>
-  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;</div>
+  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px 14px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;position:relative;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;<button onclick="document.getElementById('secAlertBanner').style.display='none'" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.4);border:1px solid #fff;border-radius:4px;color:#fff;cursor:pointer;font-size:10px;padding:2px 8px;font-family:'Courier New',monospace;letter-spacing:1px;">&#10006; DISMISS</button></div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;">
     <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">PAGES SCANNED</div>
