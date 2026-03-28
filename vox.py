@@ -1392,12 +1392,21 @@ def api_sec_reports():
         with open(_SEC_REPORTS_FILE) as f: return jsonify({"ok":True,"reports":_json.load(f)})
     return ok(reports=[])
 
+_SEC_LAST_ERROR=None
+
 @app.route("/api/security/scan",methods=["POST"])
 def api_sec_scan():
+    global _SEC_LAST_ERROR
     if e:=require_admin(): return e
     if _SEC_LOCK.locked(): return err("SCAN ALREADY RUNNING")
+    _SEC_LAST_ERROR=None
     def _run():
-        with _SEC_LOCK: _sec_run_scan()
+        global _SEC_LAST_ERROR
+        try:
+            with _SEC_LOCK: _sec_run_scan()
+        except Exception as ex:
+            _SEC_LAST_ERROR=str(ex)
+            app.logger.error(f"Security scan failed: {ex}",exc_info=True)
     threading.Thread(target=_run,daemon=True).start()
     return ok(status="started")
 
@@ -1409,7 +1418,7 @@ def api_sec_status():
         with open(_SEC_REPORTS_FILE) as f:
             rpts=_json.load(f)
             if rpts: last=rpts[0].get("timestamp")
-    return ok(scanning=_SEC_LOCK.locked(),last_scan=last,target=_SEC_TARGET,interval=_SEC_INTERVAL,next_scan=_SEC_NEXT_SCAN.isoformat() if _SEC_NEXT_SCAN else None)
+    return ok(scanning=_SEC_LOCK.locked(),last_scan=last,target=_SEC_TARGET,interval=_SEC_INTERVAL,next_scan=_SEC_NEXT_SCAN.isoformat() if _SEC_NEXT_SCAN else None,last_error=_SEC_LAST_ERROR)
 
 @app.route("/security")
 def security_dashboard():
@@ -1579,6 +1588,7 @@ async function secLoad(){
     _secNextScan=s.next_scan||null;
     document.getElementById('secInterval').textContent=s.interval||'?';
     secStartCountdown();
+    if(s.last_error){document.getElementById('secAI').innerHTML='<span style="color:#ff3355;">⚠ SCAN ERROR: '+s.last_error+'</span>';}
   }
   const d=await fetch('/api/security/reports').then(r=>r.json()).catch(()=>({}));
   if(!d.ok||!d.reports.length){document.getElementById('secAI').textContent='No scans yet. Click SCAN NOW.';return;}
