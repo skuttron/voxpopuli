@@ -31,7 +31,7 @@ if not os.path.exists(_KEY_FILE): open(_KEY_FILE,"wb").write(Fernet.generate_key
 fernet=Fernet(open(_KEY_FILE,"rb").read())
 VAPID_PUBLIC_KEY=os.environ.get("VAPID_PUBLIC_KEY","BAyH6Y_hbhzzmRgt3pd5Qa7guYKYKfsVCVIZsJGF0zYPfBupcKm24bduVIj4585JSjeeu3aeR19d4tBzlHgQIdU")
 VAPID_PRIVATE_KEY=os.environ.get("VAPID_PRIVATE_KEY","MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOqLakrDhZhnH_KBh5nwx2l0jyGfOWplqyE82s4Ryws2hRANCAAQMh-mP4W4c85kYLd6XeUGu4LmCmCn7FQlSGbCRhdM2D3wbqXCptuG3blSI-OfOSUo3nrt2nkdfXeLQc5R4ECHV")
-VAPID_CLAIMS={"sub":"mailto:admin@voxpopuli.app"}
+VAPID_CLAIMS={"sub":"mailto:admin@offgridlife.app"}
 hash_pw=lambda pw:hashlib.sha256(pw.encode()).hexdigest()
 enc=lambda t:fernet.encrypt(t.encode()).decode()
 dec=lambda t:fernet.decrypt(t.encode()).decode() if t else ""
@@ -54,8 +54,8 @@ THEMES={
 }
 NAV_ITEMS=[
     ("fa-broadcast-tower","COMMS","https://www.seeedstudio.com/XIAO-ESP32S3-for-Meshtastic-LoRa-with-3D-Printed-Enclosure-p-6314.html"),
-    ("fa-dove","VOX POPULI","#"),("fa-link","LINKTREE","#"),("fa-vault","\U0001f510 P-VAULT","#"),
-    ("fa-shield-alt","P-BLK","#"),("fa-user-check","P-VETT","#"),("fa-globe","VOX NEWS","#"),("fa-circle","BLANK 2","#"),
+    ("fa-dove","Off Grid Life","#"),("fa-link","LINKTREE","#"),("fa-vault","\U0001f510 P-VAULT","#"),
+    ("fa-shield-alt","P-BLK","#"),("fa-user-check","P-VETT","#"),("fa-globe","OGL News","#"),("fa-circle","BLANK 2","#"),
 ]
 @contextmanager
 def db():
@@ -77,40 +77,40 @@ def fetchall(con,sql,params=None):
 def fetchone(con,sql,params=None):
     cur=execute(con,sql,params);return cur.fetchone()
 _TABLES=[
-    "CREATE TABLE IF NOT EXISTS users(id SERIAL PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,theme TEXT DEFAULT 'green',is_admin INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
-    "CREATE TABLE IF NOT EXISTS messages(id SERIAL PRIMARY KEY,sender TEXT NOT NULL,recipient TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP,read INTEGER DEFAULT 0)",
-    "CREATE TABLE IF NOT EXISTS groups(id SERIAL PRIMARY KEY,name TEXT UNIQUE NOT NULL,created_by TEXT NOT NULL,locked INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
-    "CREATE TABLE IF NOT EXISTS group_members(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username))",
-    "CREATE TABLE IF NOT EXISTS group_messages(id SERIAL PRIMARY KEY,group_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP)",
-    "CREATE TABLE IF NOT EXISTS visits(id SERIAL PRIMARY KEY,date TEXT NOT NULL,ip TEXT NOT NULL,UNIQUE(date,ip))",
-    "CREATE TABLE IF NOT EXISTS active_users(ip TEXT PRIMARY KEY,last_seen TEXT NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS user_sessions(username TEXT PRIMARY KEY,last_seen TEXT NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS chat_read_at(username TEXT NOT NULL,chat_type TEXT NOT NULL,chat_id TEXT NOT NULL,read_at TEXT NOT NULL,PRIMARY KEY(username,chat_type,chat_id))",
-    "CREATE TABLE IF NOT EXISTS group_banned(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username))",
-    "CREATE TABLE IF NOT EXISTS dm_blocked(blocker TEXT NOT NULL,blocked TEXT NOT NULL,PRIMARY KEY(blocker,blocked))",
-    "CREATE TABLE IF NOT EXISTS posts(id SERIAL PRIMARY KEY,username TEXT NOT NULL,content TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
-    "CREATE TABLE IF NOT EXISTS post_reactions(post_id INTEGER NOT NULL,username TEXT NOT NULL,emoji TEXT NOT NULL,PRIMARY KEY(post_id,username))",
-    "CREATE TABLE IF NOT EXISTS private_rooms(id SERIAL PRIMARY KEY,name TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
-    "CREATE TABLE IF NOT EXISTS private_room_members(room_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(room_id,username))",
-    "CREATE TABLE IF NOT EXISTS private_room_messages(id SERIAL PRIMARY KEY,room_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP)",
-    "CREATE TABLE IF NOT EXISTS push_subscriptions(username TEXT NOT NULL,endpoint TEXT NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,PRIMARY KEY(username,endpoint))",
-    "CREATE TABLE IF NOT EXISTS password_resets(id SERIAL PRIMARY KEY,username TEXT NOT NULL,temp_password TEXT,status TEXT DEFAULT 'pending',requested_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS ogl_users(id SERIAL PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,theme TEXT DEFAULT 'green',is_admin INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS ogl_messages(id SERIAL PRIMARY KEY,sender TEXT NOT NULL,recipient TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP,read INTEGER DEFAULT 0)",
+    "CREATE TABLE IF NOT EXISTS ogl_groups(id SERIAL PRIMARY KEY,name TEXT UNIQUE NOT NULL,created_by TEXT NOT NULL,locked INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS ogl_group_members(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username))",
+    "CREATE TABLE IF NOT EXISTS ogl_group_messages(id SERIAL PRIMARY KEY,group_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS ogl_visits(id SERIAL PRIMARY KEY,date TEXT NOT NULL,ip TEXT NOT NULL,UNIQUE(date,ip))",
+    "CREATE TABLE IF NOT EXISTS ogl_active_users(ip TEXT PRIMARY KEY,last_seen TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS ogl_user_sessions(username TEXT PRIMARY KEY,last_seen TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS ogl_chat_read_at(username TEXT NOT NULL,chat_type TEXT NOT NULL,chat_id TEXT NOT NULL,read_at TEXT NOT NULL,PRIMARY KEY(username,chat_type,chat_id))",
+    "CREATE TABLE IF NOT EXISTS ogl_group_banned(group_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(group_id,username))",
+    "CREATE TABLE IF NOT EXISTS ogl_dm_blocked(blocker TEXT NOT NULL,blocked TEXT NOT NULL,PRIMARY KEY(blocker,blocked))",
+    "CREATE TABLE IF NOT EXISTS ogl_posts(id SERIAL PRIMARY KEY,username TEXT NOT NULL,content TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS ogl_post_reactions(post_id INTEGER NOT NULL,username TEXT NOT NULL,emoji TEXT NOT NULL,PRIMARY KEY(post_id,username))",
+    "CREATE TABLE IF NOT EXISTS ogl_private_rooms(id SERIAL PRIMARY KEY,name TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS ogl_private_room_members(room_id INTEGER NOT NULL,username TEXT NOT NULL,PRIMARY KEY(room_id,username))",
+    "CREATE TABLE IF NOT EXISTS ogl_private_room_messages(id SERIAL PRIMARY KEY,room_id INTEGER NOT NULL,sender TEXT NOT NULL,content_enc TEXT NOT NULL,timestamp TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS ogl_push_subscriptions(username TEXT NOT NULL,endpoint TEXT NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,PRIMARY KEY(username,endpoint))",
+    "CREATE TABLE IF NOT EXISTS ogl_password_resets(id SERIAL PRIMARY KEY,username TEXT NOT NULL,temp_password TEXT,status TEXT DEFAULT 'pending',requested_at TEXT DEFAULT CURRENT_TIMESTAMP)",
 ]
 def _do_init_db():
     with db() as con:
         cur=con.cursor()
         for sql in _TABLES: cur.execute(sql)
-        cur.execute("UPDATE chat_read_at SET read_at=replace(substr(read_at,1,19),'T',' ') WHERE read_at LIKE '%T%'")
-        cur.execute("UPDATE users SET is_admin=1 WHERE username=%s",(ADMIN_USER,))
+        cur.execute("UPDATE ogl_chat_read_at SET read_at=replace(substr(read_at,1,19),'T',' ') WHERE read_at LIKE '%T%'")
+        cur.execute("UPDATE ogl_users SET is_admin=1 WHERE username=%s",(ADMIN_USER,))
         for ch in ["GENERAL","SURVIVAL","BARTER","HOMESTEAD"]:
-            cur.execute("INSERT INTO groups(name,created_by) VALUES(%s,%s) ON CONFLICT (name) DO NOTHING",(ch,"SYSTEM"))
-        cur.execute("SELECT username FROM users");users=[r[0] for r in cur.fetchall()]
-        cur.execute("SELECT id FROM groups");groups=[r[0] for r in cur.fetchall()]
-        cur.execute("SELECT group_id,username FROM group_banned");banned={(r[0],r[1]) for r in cur.fetchall()}
+            cur.execute("INSERT INTO ogl_groups(name,created_by) VALUES(%s,%s) ON CONFLICT (name) DO NOTHING",(ch,"SYSTEM"))
+        cur.execute("SELECT username FROM ogl_users");users=[r[0] for r in cur.fetchall()]
+        cur.execute("SELECT id FROM ogl_groups");groups=[r[0] for r in cur.fetchall()]
+        cur.execute("SELECT group_id,username FROM ogl_group_banned");banned={(r[0],r[1]) for r in cur.fetchall()}
         for gid in groups:
             for uname in users:
                 if (gid,uname) not in banned:
-                    cur.execute("INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,uname))
+                    cur.execute("INSERT INTO ogl_group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,uname))
 def init_db():
     for attempt in range(5):
         try: _do_init_db();return
@@ -123,7 +123,7 @@ def is_admin(u=None):
     u=u or me()
     if not u: return False
     if u==ADMIN_USER: return True
-    with db() as con: row=fetchone(con,"SELECT is_admin FROM users WHERE username=%s",(u,))
+    with db() as con: row=fetchone(con,"SELECT is_admin FROM ogl_users WHERE username=%s",(u,))
     return bool(row and row[0])
 def require_login():
     if not logged_in(): return err("NOT LOGGED IN")
@@ -132,7 +132,7 @@ def require_admin():
 def send_push(username,title,body,tag="vox"):
     try:
         from pywebpush import webpush
-        with db() as con: subs=fetchall(con,"SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE username=%s",(username,))
+        with db() as con: subs=fetchall(con,"SELECT endpoint,p256dh,auth FROM ogl_push_subscriptions WHERE username=%s",(username,))
         for endpoint,p256dh,auth in subs:
             try:
                 webpush(subscription_info={"endpoint":endpoint,"keys":{"p256dh":p256dh,"auth":auth}},
@@ -140,10 +140,10 @@ def send_push(username,title,body,tag="vox"):
                     vapid_private_key=VAPID_PRIVATE_KEY,vapid_claims=VAPID_CLAIMS)
             except Exception as ex:
                 if hasattr(ex,'response') and ex.response and ex.response.status_code in (404,410):
-                    with db() as con2: execute(con2,"DELETE FROM push_subscriptions WHERE endpoint=%s",(endpoint,))
+                    with db() as con2: execute(con2,"DELETE FROM ogl_push_subscriptions WHERE endpoint=%s",(endpoint,))
     except Exception: pass
 def read_at_map(con,username,chat_type):
-    rows=fetchall(con,"SELECT chat_id,read_at FROM chat_read_at WHERE username=%s AND chat_type=%s",(username,chat_type))
+    rows=fetchall(con,"SELECT chat_id,read_at FROM ogl_chat_read_at WHERE username=%s AND chat_type=%s",(username,chat_type))
     return {r[0]:r[1] for r in rows}
 def unread_count(con,table,id_col,id_val,username,cutoff):
     row=fetchone(con,f"SELECT COUNT(*) FROM {table} WHERE {id_col}=%s AND sender!=%s AND timestamp>%s",(id_val,username,cutoff))
@@ -267,10 +267,10 @@ _LOGO_SVG="""<svg viewBox="0 0 400 420" width="260" height="273" xmlns="http://w
 <g class="logo-badge"><circle cx="200" cy="195" r="122" fill="url(#lgbgG)" stroke="var(--p)" stroke-width="2.8"/><circle cx="200" cy="195" r="122" fill="url(#lgrimG)"/><circle cx="200" cy="195" r="116" fill="none" stroke="var(--p)" stroke-width="0.6" opacity="0.35"/></g>
 <g clip-path="url(#lgcirc)" stroke="var(--p)" stroke-width="0.7" fill="none" opacity="0.22"><line x1="100" y1="148" x2="138" y2="148"/><line x1="138" y1="148" x2="138" y2="124"/><line x1="138" y1="124" x2="168" y2="124"/><line x1="300" y1="148" x2="262" y2="148"/><line x1="262" y1="148" x2="262" y2="124"/><line x1="262" y1="124" x2="232" y2="124"/><line x1="105" y1="235" x2="132" y2="235"/><line x1="132" y1="235" x2="132" y2="255"/><line x1="132" y1="255" x2="160" y2="255"/><line x1="295" y1="235" x2="268" y2="235"/><line x1="268" y1="235" x2="268" y2="255"/><line x1="268" y1="255" x2="240" y2="255"/><circle cx="138" cy="148" r="2.5" fill="var(--p)" opacity="0.55"/><circle cx="262" cy="148" r="2.5" fill="var(--p)" opacity="0.55"/><circle cx="132" cy="235" r="2.5" fill="var(--p)" opacity="0.55"/><circle cx="268" cy="235" r="2.5" fill="var(--p)" opacity="0.55"/><line x1="115" y1="175" x2="115" y2="210"/><line x1="285" y1="175" x2="285" y2="210"/><line x1="152" y1="108" x2="248" y2="108"/><line x1="152" y1="280" x2="248" y2="280"/><line x1="168" y1="108" x2="168" y2="118"/><line x1="232" y1="108" x2="232" y2="118"/><line x1="170" y1="155" x2="150" y2="155"/><line x1="150" y1="155" x2="150" y2="170"/><line x1="230" y1="155" x2="250" y2="155"/><line x1="250" y1="155" x2="250" y2="170"/><line x1="170" y1="240" x2="155" y2="240"/><line x1="155" y1="240" x2="155" y2="225"/><line x1="230" y1="240" x2="245" y2="240"/><line x1="245" y1="240" x2="245" y2="225"/><circle cx="150" cy="170" r="2" fill="var(--p)" opacity="0.4"/><circle cx="250" cy="170" r="2" fill="var(--p)" opacity="0.4"/><circle cx="155" cy="225" r="2" fill="var(--p)" opacity="0.4"/><circle cx="245" cy="225" r="2" fill="var(--p)" opacity="0.4"/></g>
 <circle cx="200" cy="195" r="80" fill="none" stroke="var(--p)" stroke-width="1.6" opacity="0.45" filter="url(#lgglow)"/><circle cx="200" cy="195" r="75" fill="none" stroke="var(--p)" stroke-width="0.5" opacity="0.2"/>
-<text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="var(--p)" filter="url(#lgglow)">VOX</text><text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="none" stroke="var(--p)" stroke-width="1.2" opacity="0.7">VOX</text>
+<text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="var(--p)" filter="url(#lgglow)">OGL</text><text x="200" y="210" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-weight="900" font-size="58" letter-spacing="10" fill="none" stroke="var(--p)" stroke-width="1.2" opacity="0.7">OGL</text>
 <path d="M 84,244 A 122,122 0 0,0 316,244" fill="var(--ac)" stroke="var(--p)" stroke-width="1.6" opacity="0.9"/><path d="M 90,252 A 116,116 0 0,0 310,252" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.35"/>
-<text font-family="'Courier New',Courier,monospace" font-weight="900" font-size="15" letter-spacing="4" fill="var(--p)" filter="url(#lgglow)"><textPath href="#lgarcB" startOffset="50%" text-anchor="middle">VOX POPULI</textPath></text>
-<g font-family="'Courier New',Courier,monospace" font-size="7.5" fill="var(--p)" opacity="0.38"><text x="30" y="290">N-15-77</text><text x="30" y="300">SYS:ACTIV</text><text x="30" y="310">STEALTH MODE</text><text x="280" y="290">N-15-77</text><text x="275" y="300">STR:ON</text><text x="268" y="310">VOX.POPULI.LVL3</text></g>
+<text font-family="'Courier New',Courier,monospace" font-weight="900" font-size="15" letter-spacing="4" fill="var(--p)" filter="url(#lgglow)"><textPath href="#lgarcB" startOffset="50%" text-anchor="middle">Off Grid Life</textPath></text>
+<g font-family="'Courier New',Courier,monospace" font-size="7.5" fill="var(--p)" opacity="0.38"><text x="30" y="290">N-15-77</text><text x="30" y="300">SYS:ACTIV</text><text x="30" y="310">STEALTH MODE</text><text x="280" y="290">N-15-77</text><text x="275" y="300">STR:ON</text><text x="268" y="310">OGL.OFFGRID.LVL3</text></g>
 <path d="M 56,195 A 144,144 0 0,1 344,195" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.2" stroke-dasharray="3 6"/>
 </svg>"""
 def shell(content,user=None,theme="green",unread=0):
@@ -367,9 +367,9 @@ function requestNotifPermission(){{if(!('Notification' in window))return;if(Noti
 function urlBase64ToUint8Array(b64){{const padding='='.repeat((4-b64.length%4)%4),base64=(b64+padding).replace(/-/g,'+').replace(/_/g,'/'),raw=atob(base64);return Uint8Array.from({{length:raw.length}},(_,i)=>raw.charCodeAt(i));}}
 async function setupPushSubscription(){{try{{if(!('serviceWorker' in navigator)||!('PushManager' in window))return;const reg=await navigator.serviceWorker.ready;const existing=await reg.pushManager.getSubscription();if(existing){{await api('/api/push/subscribe',existing.toJSON());return;}}const kd=await api('/api/push/vapid-public-key');if(!kd.ok||!kd.key)return;const sub=await reg.pushManager.subscribe({{userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(kd.key)}});await api('/api/push/subscribe',sub.toJSON());}}catch(e){{}}}}
 function showToast(title,body,onClick){{const t=document.createElement('div');t.className='notif-toast';t.innerHTML=`<div class="nt-title">&#128276; ${{title}}</div><div class="nt-body">${{body}}</div>`;t.onclick=()=>{{if(onClick)onClick();t.classList.add('hiding');setTimeout(()=>t.remove(),300);}};document.body.appendChild(t);setTimeout(()=>{{t.classList.add('hiding');setTimeout(()=>t.remove(),300);}},5000);}}
-function pushNotif(title,body,action){{if(_notifPermission&&Notification.permission==='granted'){{try{{const n=new Notification('VOX // '+title,{{body,icon:'/favicon.ico',badge:'/favicon.ico',tag:action}});n.onclick=()=>{{window.focus();n.close();if(action==='dm')switchTab('dm');else if(action==='group')switchTab('group');else if(action==='private')switchTab('private');else if(action==='board')switchTab('board');}};}}catch(e){{}}}}}}
+function pushNotif(title,body,action){{if(_notifPermission&&Notification.permission==='granted'){{try{{const n=new Notification('OGL // '+title,{{body,icon:'/favicon.ico',badge:'/favicon.ico',tag:action}});n.onclick=()=>{{window.focus();n.close();if(action==='dm')switchTab('dm');else if(action==='group')switchTab('group');else if(action==='private')switchTab('private');else if(action==='board')switchTab('board');}};}}catch(e){{}}}}}}
 function setBadge(id,count){{const b=$(id);if(!b)return;if(count>0){{b.textContent=count;b.style.display='inline';}}else b.style.display='none';}}
-async function checkNotifications(){{try{{const d=await api('/api/notifications');if(!d.ok)return;if(!_notifReady){{_prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,groups:d.groups||{{}},private_rooms:d.private_rooms||({{}})}};_notifReady=true;setBadge('badgeDM',d.dm);setBadge('badgeGroup',d.group);setBadge('badgePrivate',d.private);setBadge('badgeBoard',d.posts);document.title=d.total>0?'('+d.total+') VOX':'VOX';return;}}if(d.dm>0&&d.dm>_prevNotif.dm&&_prevNotif.dm>=0){{const diff=d.dm-Math.max(_prevNotif.dm,0);showToast('DIRECT MESSAGE',diff+' new message'+(diff>1?'s':''),()=>switchTab('dm'));pushNotif('DIRECT MESSAGE',diff+' new DM'+(diff>1?'s':''),'dm');}}const newGroups=d.groups||{{}},prevGroups=_prevNotif.groups||{{}};Object.entries(newGroups).forEach(([gid,info])=>{{const prevCount=(prevGroups[gid]&&prevGroups[gid].count)||0;if(info.count>prevCount){{const diff=info.count-prevCount;showToast('# '+info.name,diff+' new message'+(diff>1?'s':''),()=>{{switchTab('group');loadGroupThread(parseInt(gid),info.name,true);}});pushNotif('# '+info.name,diff+' new message'+(diff>1?'s':''),'group');}}}});const newPriv=d.private_rooms||{{}},prevPriv=_prevNotif.private_rooms||{{}};Object.entries(newPriv).forEach(([rid,info])=>{{const prevCount=(prevPriv[rid]&&prevPriv[rid].count)||0;if(info.count>prevCount){{const diff=info.count-prevCount;showToast('&#128274; '+info.name,diff+' new message'+(diff>1?'s':''),()=>{{switchTab('private');loadPrivateThread(parseInt(rid),info.name,true);}});pushNotif('&#128274; '+info.name,diff+' new message'+(diff>1?'s':''),'private');}}}});if(d.posts>0&&d.posts>_prevNotif.posts&&_prevNotif.posts>=0){{showToast('COMMUNITY BOARD','New post from a member',()=>switchTab('board'));pushNotif('COMMUNITY','New community post','board');}}setBadge('badgeDM',d.dm);setBadge('badgeGroup',d.group);setBadge('badgePrivate',d.private);setBadge('badgeBoard',d.posts);document.title=d.total>0?'('+d.total+') VOX':'VOX';_prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,groups:newGroups,private_rooms:newPriv}};}}catch(e){{}}}}
+async function checkNotifications(){{try{{const d=await api('/api/notifications');if(!d.ok)return;if(!_notifReady){{_prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,groups:d.groups||{{}},private_rooms:d.private_rooms||({{}})}};_notifReady=true;setBadge('badgeDM',d.dm);setBadge('badgeGroup',d.group);setBadge('badgePrivate',d.private);setBadge('badgeBoard',d.posts);document.title=d.total>0?'('+d.total+') Off Grid Life':'Off Grid Life';return;}}if(d.dm>0&&d.dm>_prevNotif.dm&&_prevNotif.dm>=0){{const diff=d.dm-Math.max(_prevNotif.dm,0);showToast('DIRECT MESSAGE',diff+' new message'+(diff>1?'s':''),()=>switchTab('dm'));pushNotif('DIRECT MESSAGE',diff+' new DM'+(diff>1?'s':''),'dm');}}const newGroups=d.groups||{{}},prevGroups=_prevNotif.groups||{{}};Object.entries(newGroups).forEach(([gid,info])=>{{const prevCount=(prevGroups[gid]&&prevGroups[gid].count)||0;if(info.count>prevCount){{const diff=info.count-prevCount;showToast('# '+info.name,diff+' new message'+(diff>1?'s':''),()=>{{switchTab('group');loadGroupThread(parseInt(gid),info.name,true);}});pushNotif('# '+info.name,diff+' new message'+(diff>1?'s':''),'group');}}}});const newPriv=d.private_rooms||{{}},prevPriv=_prevNotif.private_rooms||{{}};Object.entries(newPriv).forEach(([rid,info])=>{{const prevCount=(prevPriv[rid]&&prevPriv[rid].count)||0;if(info.count>prevCount){{const diff=info.count-prevCount;showToast('&#128274; '+info.name,diff+' new message'+(diff>1?'s':''),()=>{{switchTab('private');loadPrivateThread(parseInt(rid),info.name,true);}});pushNotif('&#128274; '+info.name,diff+' new message'+(diff>1?'s':''),'private');}}}});if(d.posts>0&&d.posts>_prevNotif.posts&&_prevNotif.posts>=0){{showToast('COMMUNITY BOARD','New post from a member',()=>switchTab('board'));pushNotif('COMMUNITY','New community post','board');}}setBadge('badgeDM',d.dm);setBadge('badgeGroup',d.group);setBadge('badgePrivate',d.private);setBadge('badgeBoard',d.posts);document.title=d.total>0?'('+d.total+') Off Grid Life':'Off Grid Life';_prevNotif={{dm:d.dm,group:d.group,private:d.private,posts:d.posts,groups:newGroups,private_rooms:newPriv}};}}catch(e){{}}}}
 async function loadTrafficCounter(){{try{{const d=await api('/api/traffic/public');if(d.ok){{$('tcOnline').textContent=d.online;$('tcToday').textContent=d.today;$('tcTotal').textContent=d.total;if($('tcMembers'))$('tcMembers').textContent=d.members;}}}}catch(e){{}}}}
 async function loadOnlineUsers(){{try{{const d=await api('/api/online');if(d.ok){{onlineUsers=new Set(d.online);if($('dmConvList'))loadDMConversations();}}}}catch(e){{}}}}
 function homeRunSearch(){{const q=$('homeSearchInput');if(!q)return;const query=q.value.trim();if(!query)return;window.open('https://www.google.com/search?q='+encodeURIComponent(query),'_blank','noopener,noreferrer');}}
@@ -431,7 +431,7 @@ if($('dmConvList')){{['tabContentDM','tabContentGroup','tabContentPrivate','tabC
 <meta name="theme-color" content="#00ff00">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="VOX">
+<meta name="apple-mobile-web-app-title" content="OGL">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 <style>{theme_css(theme)}</style>
@@ -506,12 +506,8 @@ if($('dmConvList')){{['tabContentDM','tabContentGroup','tabContentPrivate','tabC
 @app.route("/")
 def home():
     user=session.get("username");theme=session.get("theme","green");admin=is_admin(user)
-    # COMMS tile     = logged-in users only (not public)
-    # VOX POPULI tile = admin only
-    # All other tiles = admin only
+    # All tiles visible to everyone
     def _tile(i,l,h):
-        if l=="COMMS" and not user: return ""            # must be logged in
-        if l!="COMMS" and not admin: return ""           # everything else = admin only
         if h=="#": return f'<a class="tile" href="#"><i class="fas {i}"></i><div>| {l} |</div></a>'
         return f'<a class="tile" href="{h}" target="_blank" rel="noopener noreferrer"><i class="fas {i}"></i><div>| {l} |</div></a>'
     tiles="".join(_tile(i,l,h) for i,l,h in NAV_ITEMS)
@@ -530,9 +526,9 @@ def home():
         title_right='<span style="font-size:10px;opacity:.7;letter-spacing:1px;">[SYSTEM STATUS] [ACTIVE] &mdash; THE VOICE OF THE PEOPLE.</span><span style="font-size:9px;opacity:.4;">&#11041; FERNET-256 E2E ENCRYPTED &middot; AUTO-REFRESH 5s</span>',
         extra_header=chat_tabs,body_style="border-top:none;",border_top=False) if user else ""
     search_bar=('<div class="search-box" style="width:100%;margin:0 0 24px;"><div class="search-row"><input class="search-input" id="homeSearchInput" placeholder="&#128270; GOOGLE SEARCH..." type="text" onkeydown="if(event.key===\'Enter\')homeRunSearch()"><button class="search-btn" onclick="homeRunSearch()">&#128270; SEARCH</button></div></div>') if user else ""
-    install_banner=('<div id="installBanner" style="display:block;width:100%;margin:0 0 16px;box-sizing:border-box;"><div style="border:2px solid var(--p);border-radius:var(--r);padding:10px 16px;background:var(--p10);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;"><span style="font-size:11px;letter-spacing:1px;">&#128242; INSTALL VOX APP &mdash; ACCESS FROM YOUR HOME SCREEN</span><button id="enableNotifBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="enableNotifications()">&#128276; ENABLE NOTIFICATIONS</button><div style="display:flex;gap:8px;align-items:center;"><button id="installBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="triggerInstall()">&#11015; INSTALL</button><button onclick="document.getElementById(\'installBanner\').style.display=\'none\';localStorage.setItem(\'voxInstallDismissed\',\'1\')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:14px;padding:2px 6px;">&#10006;</button></div></div><div id="iosInstallMsg" style="display:none;border:1px solid var(--p30);border-top:none;border-radius:0 0 var(--r) var(--r);padding:8px 16px;font-size:10px;opacity:.7;letter-spacing:1px;">&#63743; ON IOS: TAP THE SHARE BUTTON THEN &ldquo;ADD TO HOME SCREEN&rdquo;</div></div>'
-        '<script>let _installPrompt=null;window.addEventListener(\'beforeinstallprompt\',e=>{e.preventDefault();_installPrompt=e;if(!localStorage.getItem(\'voxInstallDismissed\')){const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'block\';}});window.addEventListener(\'appinstalled\',()=>{const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'none\';localStorage.setItem(\'voxInstallDismissed\',\'1\');});if(typeof Notification!==\'undefined\'&&Notification.permission!==\'granted\'&&Notification.permission!==\'denied\'){const btn=document.getElementById(\'enableNotifBtn\');if(btn)btn.style.display=\'inline-block\';}if(typeof Notification!==\'undefined\'&&Notification.permission===\'granted\'){const m=document.getElementById(\'notifMenuItem\');if(m)m.style.display=\'none\';}function triggerInstall(){if(_installPrompt){_installPrompt.prompt();_installPrompt.userChoice.then(r=>{if(r.outcome===\'accepted\')localStorage.setItem(\'voxInstallDismissed\',\'1\');_installPrompt=null;});}}const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;const isStandalone=window.navigator.standalone===true||window.matchMedia(\'(display-mode: standalone)\').matches;if(!isStandalone&&!localStorage.getItem(\'voxInstallDismissed\')){const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'block\';}if(isIOS&&!isStandalone&&!localStorage.getItem(\'voxInstallDismissed\')){const b=document.getElementById(\'installBanner\');const ios=document.getElementById(\'iosInstallMsg\');const btn=document.getElementById(\'installBtn\');if(b)b.style.display=\'block\';if(ios)ios.style.display=\'block\';if(btn)btn.style.display=\'none\';}</script>') if user else ""
-    news_tabs=('<div style="display:flex;border-left:2px solid var(--p);border-right:2px solid var(--p);"><button id="newsTabWorld" onclick="switchNewsTab(\'world\')" style="flex:1;padding:6px 2px;background:var(--p);color:#000;border:none;border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127760; WORLD</button><button id="newsTabUS" onclick="switchNewsTab(\'usnews\')" style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127482;&#127480; US NEWS</button><button id="newsTabEpstein" onclick="switchNewsTab(\'epstein\')" style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#128269; EPSTEIN</button></div>')
+    install_banner=('<div id="installBanner" style="display:block;width:100%;margin:0 0 16px;box-sizing:border-box;"><div style="border:2px solid var(--p);border-radius:var(--r);padding:10px 16px;background:var(--p10);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;"><span style="font-size:11px;letter-spacing:1px;">&#128242; INSTALL OFF GRID LIFE APP &mdash; ACCESS FROM YOUR HOME SCREEN</span><button id="enableNotifBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="enableNotifications()">&#128276; ENABLE NOTIFICATIONS</button><div style="display:flex;gap:8px;align-items:center;"><button id="installBtn" class="btn-action" style="margin:0;padding:6px 16px;font-size:11px;" onclick="triggerInstall()">&#11015; INSTALL</button><button onclick="document.getElementById(\'installBanner\').style.display=\'none\';localStorage.setItem(\'oglInstallDismissed\',\'1\')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:14px;padding:2px 6px;">&#10006;</button></div></div><div id="iosInstallMsg" style="display:none;border:1px solid var(--p30);border-top:none;border-radius:0 0 var(--r) var(--r);padding:8px 16px;font-size:10px;opacity:.7;letter-spacing:1px;">&#63743; ON IOS: TAP THE SHARE BUTTON THEN &ldquo;ADD TO HOME SCREEN&rdquo;</div></div>'
+        '<script>let _installPrompt=null;window.addEventListener(\'beforeinstallprompt\',e=>{e.preventDefault();_installPrompt=e;if(!localStorage.getItem(\'oglInstallDismissed\')){const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'block\';}});window.addEventListener(\'appinstalled\',()=>{const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'none\';localStorage.setItem(\'oglInstallDismissed\',\'1\');});if(typeof Notification!==\'undefined\'&&Notification.permission!==\'granted\'&&Notification.permission!==\'denied\'){const btn=document.getElementById(\'enableNotifBtn\');if(btn)btn.style.display=\'inline-block\';}if(typeof Notification!==\'undefined\'&&Notification.permission===\'granted\'){const m=document.getElementById(\'notifMenuItem\');if(m)m.style.display=\'none\';}function triggerInstall(){if(_installPrompt){_installPrompt.prompt();_installPrompt.userChoice.then(r=>{if(r.outcome===\'accepted\')localStorage.setItem(\'oglInstallDismissed\',\'1\');_installPrompt=null;});}}const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;const isStandalone=window.navigator.standalone===true||window.matchMedia(\'(display-mode: standalone)\').matches;if(!isStandalone&&!localStorage.getItem(\'oglInstallDismissed\')){const b=document.getElementById(\'installBanner\');if(b)b.style.display=\'block\';}if(isIOS&&!isStandalone&&!localStorage.getItem(\'oglInstallDismissed\')){const b=document.getElementById(\'installBanner\');const ios=document.getElementById(\'iosInstallMsg\');const btn=document.getElementById(\'installBtn\');if(b)b.style.display=\'block\';if(ios)ios.style.display=\'block\';if(btn)btn.style.display=\'none\';}</script>') if user else ""
+    news_tabs=('<div style="display:flex;border-left:2px solid var(--p);border-right:2px solid var(--p);"><button id="newsTabWorld" onclick="switchNewsTab(\'world\')" style="flex:1;padding:6px 2px;background:var(--p);color:#000;border:none;border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127760; WORLD</button><button id="newsTabUS" onclick="switchNewsTab(\'usnews\')" style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127482;&#127480; US NEWS</button><button id="newsTabEpstein" onclick="switchNewsTab(\'epstein\')" style="flex:1;padding:6px 2px;background:var(--p10);color:var(--p);border:none;border-left:2px solid var(--p);border-bottom:2px solid var(--p);font-family:\'Courier New\',monospace;font-size:9px;font-weight:bold;text-transform:uppercase;cursor:pointer;">&#127807; OFF GRID NEWS</button></div>')
     news_panel=cyber_box("// LIVE NEWS //","<div id=\"newsFeed\" style=\"padding:16px;opacity:.4;text-align:center;font-size:11px;\">&#128256; FETCHING NEWS...</div>",
         title_right='<span id="newsFeedStatus" style="font-size:9px;opacity:.4;letter-spacing:1px;">LOADING...</span>',
         extra_header=news_tabs,max_h="320px",border_top=False) if user else ""
@@ -553,9 +549,9 @@ def api_register():
     if t not in THEMES: t="green"
     try:
         with db() as con:
-            execute(con,"INSERT INTO users(username,password_hash,theme,is_admin) VALUES(%s,%s,%s,%s)",(u,hash_pw(p),t,1 if u==ADMIN_USER else 0))
-            for gid in [r[0] for r in fetchall(con,"SELECT id FROM groups")]:
-                execute(con,"INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,u))
+            execute(con,"INSERT INTO ogl_users(username,password_hash,theme,is_admin) VALUES(%s,%s,%s,%s)",(u,hash_pw(p),t,1 if u==ADMIN_USER else 0))
+            for gid in [r[0] for r in fetchall(con,"SELECT id FROM ogl_groups")]:
+                execute(con,"INSERT INTO ogl_group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,u))
         session["username"]=u;session["theme"]=t;session.permanent=True;return ok()
     except psycopg2.errors.UniqueViolation: return err("USERNAME TAKEN")
     except Exception as e: return err(str(e))
@@ -563,11 +559,11 @@ def api_register():
 def api_login():
     d=request.json or {};u,p=d.get("username","").strip(),d.get("password","")
     with db() as con:
-        row=fetchone(con,"SELECT password_hash,theme FROM users WHERE username=%s",(u,))
+        row=fetchone(con,"SELECT password_hash,theme FROM ogl_users WHERE username=%s",(u,))
         if not row or row[0]!=hash_pw(p): return err("INVALID CREDENTIALS")
-        for gid in [r[0] for r in fetchall(con,"SELECT id FROM groups")]:
-            if not fetchone(con,"SELECT 1 FROM group_banned WHERE group_id=%s AND username=%s",(gid,u)):
-                execute(con,"INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,u))
+        for gid in [r[0] for r in fetchall(con,"SELECT id FROM ogl_groups")]:
+            if not fetchone(con,"SELECT 1 FROM ogl_group_banned WHERE group_id=%s AND username=%s",(gid,u)):
+                execute(con,"INSERT INTO ogl_group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,u))
     session["username"]=u;session["theme"]=row[1] or 'green';session.permanent=True;return ok()
 @app.route("/logout")
 def logout(): session.clear();return redirect("/")
@@ -576,7 +572,7 @@ def api_theme():
     if e:=require_login(): return e
     t=(request.json or {}).get("theme","green")
     if t not in THEMES: return err("INVALID THEME")
-    with db() as con: execute(con,"UPDATE users SET theme=%s WHERE username=%s",(t,me()))
+    with db() as con: execute(con,"UPDATE ogl_users SET theme=%s WHERE username=%s",(t,me()))
     session["theme"]=t;return ok()
 @app.route("/api/change-password",methods=["POST"])
 def api_change_password():
@@ -585,23 +581,23 @@ def api_change_password():
     if not cur_pw or not new_pw: return err("FIELDS REQUIRED")
     if len(new_pw)<6: return err("PASSWORD TOO SHORT")
     with db() as con:
-        row=fetchone(con,"SELECT password_hash FROM users WHERE username=%s",(me(),))
+        row=fetchone(con,"SELECT password_hash FROM ogl_users WHERE username=%s",(me(),))
         if not row or row[0]!=hash_pw(cur_pw): return err("CURRENT PASSWORD INCORRECT")
-        execute(con,"UPDATE users SET password_hash=%s WHERE username=%s",(hash_pw(new_pw),me()))
+        execute(con,"UPDATE ogl_users SET password_hash=%s WHERE username=%s",(hash_pw(new_pw),me()))
     return ok()
 @app.route("/api/users/search")
 def api_user_search():
     q=request.args.get("q","").strip()
     if not q: return ok(users=[])
-    with db() as con: rows=fetchall(con,"SELECT username FROM users WHERE username ILIKE %s LIMIT 10",(f"%{q}%",))
+    with db() as con: rows=fetchall(con,"SELECT username FROM ogl_users WHERE username ILIKE %s LIMIT 10",(f"%{q}%",))
     return ok(users=[r[0] for r in rows])
 @app.route("/api/posts")
 def api_posts():
     if e:=require_login(): return e
     u=me()
     with db() as con:
-        rows=fetchall(con,"SELECT id,username,content,created_at FROM posts ORDER BY created_at DESC LIMIT 50")
-        rxrows=fetchall(con,"SELECT post_id,username,emoji FROM post_reactions")
+        rows=fetchall(con,"SELECT id,username,content,created_at FROM ogl_posts ORDER BY created_at DESC LIMIT 50")
+        rxrows=fetchall(con,"SELECT post_id,username,emoji FROM ogl_post_reactions")
     rx={}
     for pid,rxu,emoji in rxrows:
         rx.setdefault(pid,{}).setdefault(emoji,{"count":0,"mine":False})
@@ -617,8 +613,8 @@ def api_posts_create():
     if len(content)>500: return err("TOO LONG")
     u=me()
     with db() as con:
-        execute(con,"INSERT INTO posts(username,content) VALUES(%s,%s)",(u,content))
-        members=[r[0] for r in fetchall(con,"SELECT username FROM users WHERE username!=%s",(u,))]
+        execute(con,"INSERT INTO ogl_posts(username,content) VALUES(%s,%s)",(u,content))
+        members=[r[0] for r in fetchall(con,"SELECT username FROM ogl_users WHERE username!=%s",(u,))]
     for member in members: send_push(member,"\U0001f4e2 COMMUNITY BOARD",f"{u}: {content[:80]}",tag="posts")
     return ok()
 @app.route("/api/posts/react",methods=["POST"])
@@ -628,34 +624,34 @@ def api_posts_react():
     if not post_id or emoji not in VALID_EMOJIS: return err("INVALID")
     u=me()
     with db() as con:
-        existing=fetchone(con,"SELECT emoji FROM post_reactions WHERE post_id=%s AND username=%s",(post_id,u))
+        existing=fetchone(con,"SELECT emoji FROM ogl_post_reactions WHERE post_id=%s AND username=%s",(post_id,u))
         if existing:
-            if existing[0]==emoji: execute(con,"DELETE FROM post_reactions WHERE post_id=%s AND username=%s",(post_id,u))
-            else: execute(con,"UPDATE post_reactions SET emoji=%s WHERE post_id=%s AND username=%s",(emoji,post_id,u))
-        else: execute(con,"INSERT INTO post_reactions(post_id,username,emoji) VALUES(%s,%s,%s)",(post_id,u,emoji))
+            if existing[0]==emoji: execute(con,"DELETE FROM ogl_post_reactions WHERE post_id=%s AND username=%s",(post_id,u))
+            else: execute(con,"UPDATE ogl_post_reactions SET emoji=%s WHERE post_id=%s AND username=%s",(emoji,post_id,u))
+        else: execute(con,"INSERT INTO ogl_post_reactions(post_id,username,emoji) VALUES(%s,%s,%s)",(post_id,u,emoji))
     return ok()
 @app.route("/api/posts/delete",methods=["POST"])
 def api_posts_delete():
     if e:=require_login(): return e
     post_id=(request.json or {}).get("post_id");u=me()
     with db() as con:
-        row=fetchone(con,"SELECT username FROM posts WHERE id=%s",(post_id,))
+        row=fetchone(con,"SELECT username FROM ogl_posts WHERE id=%s",(post_id,))
         if not row: return err("NOT FOUND")
         if row[0]!=u and not is_admin(u): return err("FORBIDDEN")
-        execute(con,"DELETE FROM post_reactions WHERE post_id=%s",(post_id,))
-        execute(con,"DELETE FROM posts WHERE id=%s",(post_id,))
+        execute(con,"DELETE FROM ogl_post_reactions WHERE post_id=%s",(post_id,))
+        execute(con,"DELETE FROM ogl_posts WHERE id=%s",(post_id,))
     return ok()
 @app.route("/api/admin/users")
 def api_admin_users():
     if e:=require_admin(): return e
-    with db() as con: rows=fetchall(con,"SELECT username,is_admin,created_at FROM users ORDER BY is_admin DESC,created_at ASC")
+    with db() as con: rows=fetchall(con,"SELECT username,is_admin,created_at FROM ogl_users ORDER BY is_admin DESC,created_at ASC")
     return ok(users=[{"username":r[0],"is_admin":bool(r[1]),"created_at":str(r[2])} for r in rows])
 @app.route("/api/admin/set-admin",methods=["POST"])
 def api_admin_set():
     if e:=require_admin(): return e
     d=request.json or {};target,grant=d.get("username",""),d.get("grant",False)
     if target==ADMIN_USER: return err("CANNOT MODIFY ROOT ADMIN")
-    with db() as con: execute(con,"UPDATE users SET is_admin=%s WHERE username=%s",(1 if grant else 0,target))
+    with db() as con: execute(con,"UPDATE ogl_users SET is_admin=%s WHERE username=%s",(1 if grant else 0,target))
     return ok()
 @app.route("/api/admin/remove-user",methods=["POST"])
 def api_admin_remove_user():
@@ -665,23 +661,23 @@ def api_admin_remove_user():
     with db() as con:
         for tbl,col in [("messages","sender"),("messages","recipient"),("group_messages","sender"),("group_members","username")]:
             execute(con,f"DELETE FROM {tbl} WHERE {col}=%s",(target,))
-        execute(con,"DELETE FROM users WHERE username=%s",(target,))
+        execute(con,"DELETE FROM ogl_users WHERE username=%s",(target,))
     return ok()
 @app.route("/api/admin/dm-log")
 def api_admin_dm_log():
     if e:=require_admin(): return e
-    with db() as con: rows=fetchall(con,"SELECT id,sender,recipient,content_enc,timestamp FROM messages ORDER BY timestamp DESC LIMIT 200")
+    with db() as con: rows=fetchall(con,"SELECT id,sender,recipient,content_enc,timestamp FROM ogl_messages ORDER BY timestamp DESC LIMIT 200")
     return ok(messages=[{"id":r[0],"sender":r[1],"recipient":r[2],"content":dec(r[3]),"timestamp":str(r[4])} for r in rows])
 @app.route("/api/admin/delete-dm",methods=["POST"])
 def api_admin_delete_dm():
     if e:=require_admin(): return e
-    with db() as con: execute(con,"DELETE FROM messages WHERE id=%s",(request.json.get("id"),))
+    with db() as con: execute(con,"DELETE FROM ogl_messages WHERE id=%s",(request.json.get("id"),))
     return ok()
 @app.route("/api/admin/group-log")
 def api_admin_group_log():
     if e:=require_admin(): return e
     with db() as con:
-        rows=fetchall(con,"SELECT gm.id,g.id,g.name,gm.sender,gm.content_enc,gm.timestamp FROM group_messages gm JOIN groups g ON g.id=gm.group_id ORDER BY gm.timestamp DESC LIMIT 200")
+        rows=fetchall(con,"SELECT gm.id,g.id,g.name,gm.sender,gm.content_enc,gm.timestamp FROM ogl_group_messages gm JOIN ogl_groups g ON g.id=gm.group_id ORDER BY gm.timestamp DESC LIMIT 200")
     return ok(messages=[{"id":r[0],"group_id":r[1],"group":r[2],"sender":r[3],"content":dec(r[4]),"timestamp":str(r[5])} for r in rows])
 @app.route("/api/admin/user-chat")
 def api_admin_user_chat():
@@ -689,8 +685,8 @@ def api_admin_user_chat():
     username=request.args.get("username","").strip()
     if not username: return err("USERNAME REQUIRED")
     with db() as con:
-        if not fetchone(con,"SELECT id FROM users WHERE username=%s",(username,)): return err("USER NOT FOUND")
-        rows=fetchall(con,"SELECT id,sender,recipient,content_enc,timestamp FROM messages WHERE sender=%s OR recipient=%s ORDER BY timestamp ASC",(username,username))
+        if not fetchone(con,"SELECT id FROM ogl_users WHERE username=%s",(username,)): return err("USER NOT FOUND")
+        rows=fetchall(con,"SELECT id,sender,recipient,content_enc,timestamp FROM ogl_messages WHERE sender=%s OR recipient=%s ORDER BY timestamp ASC",(username,username))
     convos={}
     for r in rows:
         p=r[2] if r[1]==username else r[1]
@@ -702,7 +698,7 @@ def api_admin_delete_convo():
     if e:=require_admin(): return e
     u1,u2=(request.json or {}).get("user1",""),(request.json or {}).get("user2","")
     if not u1 or not u2: return err("MISSING USERS")
-    with db() as con: execute(con,"DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)",(u1,u2,u2,u1))
+    with db() as con: execute(con,"DELETE FROM ogl_messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)",(u1,u2,u2,u1))
     return ok()
 @app.route("/api/admin/delete-channel",methods=["POST"])
 def api_admin_delete_channel():
@@ -710,33 +706,33 @@ def api_admin_delete_channel():
     gid=(request.json or {}).get("group_id")
     if not gid: return err("MISSING GROUP ID")
     with db() as con:
-        for sql,p in [("DELETE FROM group_messages WHERE group_id=%s",(gid,)),("DELETE FROM group_members WHERE group_id=%s",(gid,)),
-                      ("DELETE FROM group_banned WHERE group_id=%s",(gid,)),("DELETE FROM groups WHERE id=%s",(gid,))]:
+        for sql,p in [("DELETE FROM ogl_group_messages WHERE group_id=%s",(gid,)),("DELETE FROM ogl_group_members WHERE group_id=%s",(gid,)),
+                      ("DELETE FROM ogl_group_banned WHERE group_id=%s",(gid,)),("DELETE FROM ogl_groups WHERE id=%s",(gid,))]:
             execute(con,sql,p)
     return ok()
 @app.route("/api/admin/delete-group-msg",methods=["POST"])
 def api_admin_delete_group_msg():
     if e:=require_admin(): return e
-    with db() as con: execute(con,"DELETE FROM group_messages WHERE id=%s",(request.json.get("id"),))
+    with db() as con: execute(con,"DELETE FROM ogl_group_messages WHERE id=%s",(request.json.get("id"),))
     return ok()
 @app.route("/api/admin/lock-channel",methods=["POST"])
 def api_admin_lock_channel():
     if e:=require_admin(): return e
     d=request.json or {}
-    with db() as con: execute(con,"UPDATE groups SET locked=%s WHERE id=%s",(1 if d.get("lock") else 0,d.get("group_id")))
+    with db() as con: execute(con,"UPDATE ogl_groups SET locked=%s WHERE id=%s",(1 if d.get("lock") else 0,d.get("group_id")))
     return ok()
 @app.route("/api/admin/traffic")
 def api_admin_traffic():
     if e:=require_admin(): return e
     with db() as con:
-        rows=fetchall(con,"SELECT date,COUNT(*) FROM visits GROUP BY date ORDER BY date DESC LIMIT 30")
-        total=fetchone(con,"SELECT COUNT(DISTINCT ip) FROM visits")[0]
-        today=fetchone(con,"SELECT COUNT(*) FROM visits WHERE date=CURRENT_DATE::text")[0]
+        rows=fetchall(con,"SELECT date,COUNT(*) FROM ogl_visits GROUP BY date ORDER BY date DESC LIMIT 30")
+        total=fetchone(con,"SELECT COUNT(DISTINCT ip) FROM ogl_visits")[0]
+        today=fetchone(con,"SELECT COUNT(*) FROM ogl_visits WHERE date=CURRENT_DATE::text")[0]
     return ok(days=[{"date":r[0],"visitors":r[1]} for r in rows],total=total,today=today)
 @app.route("/api/admin/reset-requests")
 def api_admin_reset_requests():
     if e:=require_admin(): return e
-    with db() as con: rows=fetchall(con,"SELECT id,username,temp_password,status,requested_at FROM password_resets WHERE status='pending' ORDER BY requested_at DESC")
+    with db() as con: rows=fetchall(con,"SELECT id,username,temp_password,status,requested_at FROM ogl_password_resets WHERE status='pending' ORDER BY requested_at DESC")
     return ok(requests=[{"id":r[0],"username":r[1],"temp_password":r[2],"status":r[3],"requested_at":str(r[4])} for r in rows])
 @app.route("/api/admin/reset-approve",methods=["POST"])
 def api_admin_reset_approve():
@@ -745,45 +741,45 @@ def api_admin_reset_approve():
     if not rid or not temp_pw: return err("MISSING FIELDS")
     if len(temp_pw)<4: return err("TEMP PASSWORD TOO SHORT")
     with db() as con:
-        row=fetchone(con,"SELECT username FROM password_resets WHERE id=%s",(rid,))
+        row=fetchone(con,"SELECT username FROM ogl_password_resets WHERE id=%s",(rid,))
         if not row: return err("REQUEST NOT FOUND")
-        execute(con,"UPDATE users SET password_hash=%s WHERE username=%s",(hash_pw(temp_pw),row[0]))
-        execute(con,"UPDATE password_resets SET status='approved',temp_password=%s WHERE id=%s",(temp_pw,rid))
+        execute(con,"UPDATE ogl_users SET password_hash=%s WHERE username=%s",(hash_pw(temp_pw),row[0]))
+        execute(con,"UPDATE ogl_password_resets SET status='approved',temp_password=%s WHERE id=%s",(temp_pw,rid))
     return ok()
 @app.route("/api/admin/reset-deny",methods=["POST"])
 def api_admin_reset_deny():
     if e:=require_admin(): return e
     rid=(request.json or {}).get("id")
     if not rid: return err("MISSING ID")
-    with db() as con: execute(con,"UPDATE password_resets SET status='denied' WHERE id=%s",(rid,))
+    with db() as con: execute(con,"UPDATE ogl_password_resets SET status='denied' WHERE id=%s",(rid,))
     return ok()
 @app.before_request
 def track_visit():
     if request.path.startswith(("/api","/static")): return
     now=utc_now()
     with db() as con:
-        execute(con,"INSERT INTO visits(date,ip) VALUES(%s,%s) ON CONFLICT DO NOTHING",(datetime.date.today().isoformat(),get_ip()))
+        execute(con,"INSERT INTO ogl_visits(date,ip) VALUES(%s,%s) ON CONFLICT DO NOTHING",(datetime.date.today().isoformat(),get_ip()))
         u=session.get("username")
-        if u: execute(con,"INSERT INTO user_sessions(username,last_seen) VALUES(%s,%s) ON CONFLICT (username) DO UPDATE SET last_seen=EXCLUDED.last_seen",(u,now))
+        if u: execute(con,"INSERT INTO ogl_user_sessions(username,last_seen) VALUES(%s,%s) ON CONFLICT (username) DO UPDATE SET last_seen=EXCLUDED.last_seen",(u,now))
 @app.route("/api/traffic/public")
 def api_traffic_public():
     ip,now=get_ip(),utc_now();cutoff=utc_cutoff(2);u=session.get("username")
     with db() as con:
-        execute(con,"INSERT INTO visits(date,ip) VALUES(%s,%s) ON CONFLICT DO NOTHING",(datetime.date.today().isoformat(),ip))
-        execute(con,"INSERT INTO active_users(ip,last_seen) VALUES(%s,%s) ON CONFLICT (ip) DO UPDATE SET last_seen=EXCLUDED.last_seen",(ip,now))
-        execute(con,"DELETE FROM active_users WHERE last_seen < %s",(cutoff,))
-        if u: execute(con,"INSERT INTO user_sessions(username,last_seen) VALUES(%s,%s) ON CONFLICT (username) DO UPDATE SET last_seen=EXCLUDED.last_seen",(u,now))
-        execute(con,"DELETE FROM user_sessions WHERE last_seen < %s",(cutoff,))
-        today=fetchone(con,"SELECT COUNT(*) FROM visits WHERE date=CURRENT_DATE::text")[0]
-        total=fetchone(con,"SELECT COUNT(DISTINCT ip) FROM visits")[0]
-        online=fetchone(con,"SELECT COUNT(*) FROM active_users")[0]
-        members=fetchone(con,"SELECT COUNT(*) FROM users")[0]
+        execute(con,"INSERT INTO ogl_visits(date,ip) VALUES(%s,%s) ON CONFLICT DO NOTHING",(datetime.date.today().isoformat(),ip))
+        execute(con,"INSERT INTO ogl_active_users(ip,last_seen) VALUES(%s,%s) ON CONFLICT (ip) DO UPDATE SET last_seen=EXCLUDED.last_seen",(ip,now))
+        execute(con,"DELETE FROM ogl_active_users WHERE last_seen < %s",(cutoff,))
+        if u: execute(con,"INSERT INTO ogl_user_sessions(username,last_seen) VALUES(%s,%s) ON CONFLICT (username) DO UPDATE SET last_seen=EXCLUDED.last_seen",(u,now))
+        execute(con,"DELETE FROM ogl_user_sessions WHERE last_seen < %s",(cutoff,))
+        today=fetchone(con,"SELECT COUNT(*) FROM ogl_visits WHERE date=CURRENT_DATE::text")[0]
+        total=fetchone(con,"SELECT COUNT(DISTINCT ip) FROM ogl_visits")[0]
+        online=fetchone(con,"SELECT COUNT(*) FROM ogl_active_users")[0]
+        members=fetchone(con,"SELECT COUNT(*) FROM ogl_users")[0]
     return ok(today=today,total=total,online=online,members=members)
 @app.route("/api/online")
 def api_online():
     if not logged_in(): return ok(online=[])
     cutoff=utc_cutoff(2)
-    with db() as con: rows=fetchall(con,"SELECT username FROM user_sessions WHERE last_seen >= %s",(cutoff,))
+    with db() as con: rows=fetchall(con,"SELECT username FROM ogl_user_sessions WHERE last_seen >= %s",(cutoff,))
     return ok(online=[r[0] for r in rows])
 @app.route("/api/news")
 def api_news():
@@ -793,7 +789,7 @@ def api_news():
     FEEDS={
         "world":[("https://news.google.com/rss/headlines/section/topic/WORLD","WORLD"),("https://news.google.com/rss/headlines/section/topic/NATION","NATION"),("https://news.google.com/rss/headlines/section/topic/BUSINESS","BUSINESS"),("https://news.google.com/rss/headlines/section/topic/HEALTH","HEALTH"),("https://news.google.com/rss/headlines/section/topic/SCIENCE","SCIENCE"),("https://news.google.com/rss/headlines/section/topic/TECHNOLOGY","TECH")],
         "usnews":[("https://news.google.com/rss/headlines/section/geo/US","US"),("https://news.google.com/rss/search?q=united+states+news","US NEWS"),("https://news.google.com/rss/search?q=US+politics+government","POLITICS"),("https://news.google.com/rss/search?q=US+economy+inflation","ECONOMY"),("https://news.google.com/rss/search?q=US+border+immigration","BORDER"),("https://news.google.com/rss/search?q=US+military+defense","MILITARY")],
-        "epstein":[("https://news.google.com/rss/search?q=epstein+files+documents","FILES"),("https://news.google.com/rss/search?q=jeffrey+epstein+court","COURT"),("https://news.google.com/rss/search?q=epstein+ghislaine+maxwell","MAXWELL"),("https://news.google.com/rss/search?q=epstein+client+list","CLIENTS"),("https://news.google.com/rss/search?q=epstein+island+investigation","INVESTIGATION"),("https://news.google.com/rss/search?q=epstein+jeffrey+news+2024","LATEST")],
+        "epstein":[("https://news.google.com/rss/search?q=off+grid+living","OFF GRID"),("https://news.google.com/rss/search?q=homesteading+self+sufficiency","HOMESTEAD"),("https://news.google.com/rss/search?q=survival+prepping+preparedness","SURVIVAL"),("https://news.google.com/rss/search?q=solar+power+renewable+energy+home","ENERGY"),("https://news.google.com/rss/search?q=food+storage+preservation","FOOD"),("https://news.google.com/rss/search?q=rural+living+farming","RURAL")],
     }
     feeds=FEEDS.get(feed_type,FEEDS["world"])
     UAS=["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"]
@@ -825,10 +821,10 @@ def api_dm_conversations():
     u=me()
     with db() as con:
         read_dm_at=read_at_map(con,u,'dm')
-        partners=fetchall(con,"SELECT CASE WHEN sender=%s THEN recipient ELSE sender END as partner,MAX(timestamp) FROM messages WHERE sender=%s OR recipient=%s GROUP BY partner ORDER BY 2 DESC",(u,u,u))
+        partners=fetchall(con,"SELECT CASE WHEN sender=%s THEN recipient ELSE sender END as partner,MAX(timestamp) FROM ogl_messages WHERE sender=%s OR recipient=%s GROUP BY partner ORDER BY 2 DESC",(u,u,u))
         convos=[]
         for (partner,_) in partners:
-            row=fetchone(con,"SELECT COUNT(*) FROM messages WHERE sender=%s AND recipient=%s AND timestamp>%s",(partner,u,read_dm_at.get(partner,'1970-01-01')))
+            row=fetchone(con,"SELECT COUNT(*) FROM ogl_messages WHERE sender=%s AND recipient=%s AND timestamp>%s",(partner,u,read_dm_at.get(partner,'1970-01-01')))
             convos.append({"username":partner,"unread":row[0] if row else 0})
     return ok(conversations=convos)
 @app.route("/api/dm/thread")
@@ -837,8 +833,8 @@ def api_dm_thread():
     u,other=me(),request.args.get("with","").strip()
     if not other: return jsonify({"ok":False})
     with db() as con:
-        rows=fetchall(con,"SELECT sender,content_enc,timestamp FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s) ORDER BY timestamp ASC LIMIT 100",(u,other,other,u))
-        execute(con,"UPDATE messages SET read=1 WHERE recipient=%s AND sender=%s",(u,other))
+        rows=fetchall(con,"SELECT sender,content_enc,timestamp FROM ogl_messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s) ORDER BY timestamp ASC LIMIT 100",(u,other,other,u))
+        execute(con,"UPDATE ogl_messages SET read=1 WHERE recipient=%s AND sender=%s",(u,other))
     return ok(me=u,messages=dec_messages(rows))
 @app.route("/api/dm/send",methods=["POST"])
 def api_dm_send():
@@ -847,9 +843,9 @@ def api_dm_send():
     if not to or not content: return err("FIELDS REQUIRED")
     u=me()
     with db() as con:
-        if not fetchone(con,"SELECT id FROM users WHERE username=%s",(to,)): return err("USER NOT FOUND")
-        if fetchone(con,"SELECT 1 FROM dm_blocked WHERE (blocker=%s AND blocked=%s) OR (blocker=%s AND blocked=%s)",(u,to,to,u)): return err("CANNOT MESSAGE THIS USER")
-        execute(con,"INSERT INTO messages(sender,recipient,content_enc) VALUES(%s,%s,%s)",(u,to,enc(content)))
+        if not fetchone(con,"SELECT id FROM ogl_users WHERE username=%s",(to,)): return err("USER NOT FOUND")
+        if fetchone(con,"SELECT 1 FROM ogl_dm_blocked WHERE (blocker=%s AND blocked=%s) OR (blocker=%s AND blocked=%s)",(u,to,to,u)): return err("CANNOT MESSAGE THIS USER")
+        execute(con,"INSERT INTO ogl_messages(sender,recipient,content_enc) VALUES(%s,%s,%s)",(u,to,enc(content)))
     send_push(to,f"DM from {u}",content[:80],tag="dm");return ok()
 @app.route("/api/dm/delete",methods=["POST"])
 def api_dm_delete():
@@ -857,7 +853,7 @@ def api_dm_delete():
     other=(request.json or {}).get("username","").strip()
     if not other: return err("MISSING USERNAME")
     u=me()
-    with db() as con: execute(con,"DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)",(u,other,other,u))
+    with db() as con: execute(con,"DELETE FROM ogl_messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)",(u,other,other,u))
     return ok()
 @app.route("/api/dm/block",methods=["POST"])
 def api_dm_block():
@@ -866,23 +862,23 @@ def api_dm_block():
     if not other: return err("MISSING USERNAME")
     u=me()
     with db() as con:
-        execute(con,"INSERT INTO dm_blocked(blocker,blocked) VALUES(%s,%s) ON CONFLICT DO NOTHING",(u,other))
-        execute(con,"DELETE FROM messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)",(u,other,other,u))
+        execute(con,"INSERT INTO ogl_dm_blocked(blocker,blocked) VALUES(%s,%s) ON CONFLICT DO NOTHING",(u,other))
+        execute(con,"DELETE FROM ogl_messages WHERE (sender=%s AND recipient=%s) OR (sender=%s AND recipient=%s)",(u,other,other,u))
     return ok()
 @app.route("/api/dm/unblock",methods=["POST"])
 def api_dm_unblock():
     if e:=require_login(): return e
     other=(request.json or {}).get("username","").strip()
-    with db() as con: execute(con,"DELETE FROM dm_blocked WHERE blocker=%s AND blocked=%s",(me(),other))
+    with db() as con: execute(con,"DELETE FROM ogl_dm_blocked WHERE blocker=%s AND blocked=%s",(me(),other))
     return ok()
 @app.route("/api/groups")
 def api_groups():
     if not logged_in(): return jsonify({"ok":False})
     u=me()
     with db() as con:
-        rows=fetchall(con,"SELECT id,name,locked FROM groups ORDER BY id ASC")
-        member_ids={r[0] for r in fetchall(con,"SELECT group_id FROM group_members WHERE username=%s",(u,))}
-        banned_ids={r[0] for r in fetchall(con,"SELECT group_id FROM group_banned WHERE username=%s",(u,))}
+        rows=fetchall(con,"SELECT id,name,locked FROM ogl_groups ORDER BY id ASC")
+        member_ids={r[0] for r in fetchall(con,"SELECT group_id FROM ogl_group_members WHERE username=%s",(u,))}
+        banned_ids={r[0] for r in fetchall(con,"SELECT group_id FROM ogl_group_banned WHERE username=%s",(u,))}
         rat=read_at_map(con,u,'group')
         unread={r[0]:unread_count(con,'group_messages','group_id',r[0],u,rat.get(str(r[0]),'1970-01-01')) for r in rows}
     return ok(groups=[{"id":r[0],"name":r[1],"member":r[0] in member_ids,"locked":bool(r[2]),"banned":r[0] in banned_ids,"unread":unread.get(r[0],0)} for r in rows])
@@ -893,9 +889,9 @@ def api_group_create():
     if not name or len(name)<2: return err("NAME TOO SHORT")
     try:
         with db() as con:
-            row=fetchone(con,"INSERT INTO groups(name,created_by) VALUES(%s,%s) RETURNING id",(name,me()));gid=row[0]
-            for uname in [r[0] for r in fetchall(con,"SELECT username FROM users")]:
-                execute(con,"INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,uname))
+            row=fetchone(con,"INSERT INTO ogl_groups(name,created_by) VALUES(%s,%s) RETURNING id",(name,me()));gid=row[0]
+            for uname in [r[0] for r in fetchall(con,"SELECT username FROM ogl_users")]:
+                execute(con,"INSERT INTO ogl_group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,uname))
         return ok(id=gid)
     except psycopg2.errors.UniqueViolation: return err("CHANNEL NAME TAKEN")
 @app.route("/api/groups/<int:gid>/messages")
@@ -903,13 +899,13 @@ def api_group_messages(gid):
     if not logged_in(): return jsonify({"ok":False})
     u=me();admin=is_admin(u)
     with db() as con:
-        banned=fetchone(con,"SELECT 1 FROM group_banned WHERE group_id=%s AND username=%s",(gid,u))
-        member=fetchone(con,"SELECT 1 FROM group_members WHERE group_id=%s AND username=%s",(gid,u))
+        banned=fetchone(con,"SELECT 1 FROM ogl_group_banned WHERE group_id=%s AND username=%s",(gid,u))
+        member=fetchone(con,"SELECT 1 FROM ogl_group_members WHERE group_id=%s AND username=%s",(gid,u))
         if not banned and not member:
-            execute(con,"INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,u));member=True
-        group=fetchone(con,"SELECT locked FROM groups WHERE id=%s",(gid,))
-        rows=fetchall(con,"SELECT sender,content_enc,timestamp FROM group_messages WHERE group_id=%s ORDER BY timestamp ASC LIMIT 100",(gid,))
-        members_list=[r[0] for r in fetchall(con,"SELECT username FROM group_members WHERE group_id=%s ORDER BY username",(gid,))] if admin else []
+            execute(con,"INSERT INTO ogl_group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,u));member=True
+        group=fetchone(con,"SELECT locked FROM ogl_groups WHERE id=%s",(gid,))
+        rows=fetchall(con,"SELECT sender,content_enc,timestamp FROM ogl_group_messages WHERE group_id=%s ORDER BY timestamp ASC LIMIT 100",(gid,))
+        members_list=[r[0] for r in fetchall(con,"SELECT username FROM ogl_group_members WHERE group_id=%s ORDER BY username",(gid,))] if admin else []
     is_member=admin or (bool(member) and not bool(banned))
     return ok(me=u,member=is_member,locked=bool(group and group[0]),admin=admin,members=members_list,messages=dec_messages(rows))
 @app.route("/api/groups/send",methods=["POST"])
@@ -919,14 +915,14 @@ def api_group_send():
     if not content: return err("EMPTY MESSAGE")
     u=me()
     with db() as con:
-        if not fetchone(con,"SELECT 1 FROM group_members WHERE group_id=%s AND username=%s",(gid,u)): return err("NOT A MEMBER")
+        if not fetchone(con,"SELECT 1 FROM ogl_group_members WHERE group_id=%s AND username=%s",(gid,u)): return err("NOT A MEMBER")
         if not is_admin(u):
-            g=fetchone(con,"SELECT locked FROM groups WHERE id=%s",(gid,))
+            g=fetchone(con,"SELECT locked FROM ogl_groups WHERE id=%s",(gid,))
             if g and g[0]: return err("CHANNEL IS LOCKED")
-        execute(con,"INSERT INTO group_messages(group_id,sender,content_enc) VALUES(%s,%s,%s)",(gid,u,enc(content)))
+        execute(con,"INSERT INTO ogl_group_messages(group_id,sender,content_enc) VALUES(%s,%s,%s)",(gid,u,enc(content)))
     with db() as con2:
-        gname_row=fetchone(con2,"SELECT name FROM groups WHERE id=%s",(gid,))
-        members=[r[0] for r in fetchall(con2,"SELECT username FROM group_members WHERE group_id=%s AND username!=%s",(gid,u))]
+        gname_row=fetchone(con2,"SELECT name FROM ogl_groups WHERE id=%s",(gid,))
+        members=[r[0] for r in fetchall(con2,"SELECT username FROM ogl_group_members WHERE group_id=%s AND username!=%s",(gid,u))]
     gname=gname_row[0] if gname_row else "GROUP"
     for member in members: send_push(member,f"#{gname}",f"{u}: {content[:60]}",tag=f"group-{gid}")
     return ok()
@@ -935,7 +931,7 @@ def api_group_kick():
     if e:=require_admin(): return e
     d=request.json or {};gid,target=d.get("group_id"),d.get("username","").strip()
     if not gid or not target: return err("MISSING FIELDS")
-    with db() as con: execute(con,"DELETE FROM group_members WHERE group_id=%s AND username=%s",(gid,target))
+    with db() as con: execute(con,"DELETE FROM ogl_group_members WHERE group_id=%s AND username=%s",(gid,target))
     return ok()
 @app.route("/api/groups/ban",methods=["POST"])
 def api_group_ban():
@@ -943,26 +939,26 @@ def api_group_ban():
     d=request.json or {};gid,target=d.get("group_id"),d.get("username","").strip()
     if not gid or not target: return err("MISSING FIELDS")
     with db() as con:
-        execute(con,"DELETE FROM group_members WHERE group_id=%s AND username=%s",(gid,target))
-        execute(con,"INSERT INTO group_banned(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,target))
+        execute(con,"DELETE FROM ogl_group_members WHERE group_id=%s AND username=%s",(gid,target))
+        execute(con,"INSERT INTO ogl_group_banned(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,target))
     return ok()
 @app.route("/api/groups/unban",methods=["POST"])
 def api_group_unban():
     if e:=require_admin(): return e
     d=request.json or {};gid,target=d.get("group_id"),d.get("username","").strip()
     with db() as con:
-        execute(con,"DELETE FROM group_banned WHERE group_id=%s AND username=%s",(gid,target))
-        execute(con,"INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,target))
+        execute(con,"DELETE FROM ogl_group_banned WHERE group_id=%s AND username=%s",(gid,target))
+        execute(con,"INSERT INTO ogl_group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(gid,target))
     return ok()
 @app.route("/api/groups/join",methods=["POST"])
 def api_group_join():
     if not logged_in(): return jsonify({"ok":False})
-    with db() as con: execute(con,"INSERT INTO group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(request.json.get("group_id"),me()))
+    with db() as con: execute(con,"INSERT INTO ogl_group_members(group_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(request.json.get("group_id"),me()))
     return ok()
 @app.route("/api/groups/leave",methods=["POST"])
 def api_group_leave():
     if not logged_in(): return jsonify({"ok":False})
-    with db() as con: execute(con,"DELETE FROM group_members WHERE group_id=%s AND username=%s",(request.json.get("group_id"),me()))
+    with db() as con: execute(con,"DELETE FROM ogl_group_members WHERE group_id=%s AND username=%s",(request.json.get("group_id"),me()))
     return ok()
 @app.route("/api/group/rename",methods=["POST"])
 def api_group_rename():
@@ -970,7 +966,7 @@ def api_group_rename():
     d=request.json or {};gid,name=d.get("id"),d.get("name","").strip().upper()
     if not gid or not name: return err("MISSING FIELDS")
     try:
-        with db() as con: execute(con,"UPDATE groups SET name=%s WHERE id=%s",(name,gid))
+        with db() as con: execute(con,"UPDATE ogl_groups SET name=%s WHERE id=%s",(name,gid))
         return ok()
     except Exception: return err("NAME TAKEN")
 @app.route("/api/private/rooms")
@@ -978,7 +974,7 @@ def api_private_rooms():
     if e:=require_login(): return e
     u=me();admin=is_admin(u)
     with db() as con:
-        rows=fetchall(con,"SELECT id,name FROM private_rooms ORDER BY name ASC") if admin else fetchall(con,"SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=%s ORDER BY r.name ASC",(u,))
+        rows=fetchall(con,"SELECT id,name FROM ogl_private_rooms ORDER BY name ASC") if admin else fetchall(con,"SELECT r.id,r.name FROM ogl_private_rooms r JOIN ogl_private_room_members m ON r.id=m.room_id WHERE m.username=%s ORDER BY r.name ASC",(u,))
         rat=read_at_map(con,u,'private')
         unread={r[0]:unread_count(con,'private_room_messages','room_id',r[0],u,rat.get(str(r[0]),'1970-01-01')) for r in rows}
     return ok(rooms=[{"id":r[0],"name":r[1],"unread":unread.get(r[0],0)} for r in rows],is_admin=admin)
@@ -988,8 +984,8 @@ def api_private_create():
     name=(request.json or {}).get("name","").strip().upper()
     if not name: return err("NAME REQUIRED")
     with db() as con:
-        row=fetchone(con,"INSERT INTO private_rooms(name,created_by) VALUES(%s,%s) RETURNING id",(name,me()));rid=row[0]
-        execute(con,"INSERT INTO private_room_members(room_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(rid,me()))
+        row=fetchone(con,"INSERT INTO ogl_private_rooms(name,created_by) VALUES(%s,%s) RETURNING id",(name,me()));rid=row[0]
+        execute(con,"INSERT INTO ogl_private_room_members(room_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(rid,me()))
     return ok(id=rid)
 @app.route("/api/private/<int:rid>/messages")
 def api_private_messages(rid):
@@ -997,8 +993,8 @@ def api_private_messages(rid):
     u=me();admin=is_admin(u)
     with db() as con:
         if not admin:
-            if not fetchone(con,"SELECT 1 FROM private_room_members WHERE room_id=%s AND username=%s",(rid,u)): return err("ACCESS DENIED")
-        rows=fetchall(con,"SELECT sender,content_enc,timestamp FROM private_room_messages WHERE room_id=%s ORDER BY timestamp ASC LIMIT 100",(rid,))
+            if not fetchone(con,"SELECT 1 FROM ogl_private_room_members WHERE room_id=%s AND username=%s",(rid,u)): return err("ACCESS DENIED")
+        rows=fetchall(con,"SELECT sender,content_enc,timestamp FROM ogl_private_room_messages WHERE room_id=%s ORDER BY timestamp ASC LIMIT 100",(rid,))
     return ok(me=u,is_admin=admin,messages=dec_messages(rows))
 @app.route("/api/private/send",methods=["POST"])
 def api_private_send():
@@ -1008,18 +1004,18 @@ def api_private_send():
     u=me()
     with db() as con:
         if not is_admin(u):
-            if not fetchone(con,"SELECT 1 FROM private_room_members WHERE room_id=%s AND username=%s",(rid,u)): return err("ACCESS DENIED")
-        execute(con,"INSERT INTO private_room_messages(room_id,sender,content_enc) VALUES(%s,%s,%s)",(rid,u,enc(content)))
+            if not fetchone(con,"SELECT 1 FROM ogl_private_room_members WHERE room_id=%s AND username=%s",(rid,u)): return err("ACCESS DENIED")
+        execute(con,"INSERT INTO ogl_private_room_messages(room_id,sender,content_enc) VALUES(%s,%s,%s)",(rid,u,enc(content)))
     with db() as con2:
-        rname_row=fetchone(con2,"SELECT name FROM private_rooms WHERE id=%s",(rid,))
-        members=[r[0] for r in fetchall(con2,"SELECT username FROM private_room_members WHERE room_id=%s AND username!=%s",(rid,u))]
+        rname_row=fetchone(con2,"SELECT name FROM ogl_private_rooms WHERE id=%s",(rid,))
+        members=[r[0] for r in fetchall(con2,"SELECT username FROM ogl_private_room_members WHERE room_id=%s AND username!=%s",(rid,u))]
     rname=rname_row[0] if rname_row else "PRIVATE"
     for member in members: send_push(member,f"🔒 {rname}",f"{u}: {content[:60]}",tag=f"private-{rid}")
     return ok()
 @app.route("/api/private/<int:rid>/members")
 def api_private_members(rid):
     if e:=require_admin(): return e
-    with db() as con: rows=fetchall(con,"SELECT username FROM private_room_members WHERE room_id=%s ORDER BY username",(rid,))
+    with db() as con: rows=fetchall(con,"SELECT username FROM ogl_private_room_members WHERE room_id=%s ORDER BY username",(rid,))
     return ok(members=[r[0] for r in rows])
 @app.route("/api/private/add-member",methods=["POST"])
 def api_private_add_member():
@@ -1027,22 +1023,22 @@ def api_private_add_member():
     d=request.json or {};rid,username=d.get("room_id"),d.get("username","").strip()
     if not rid or not username: return err("MISSING FIELDS")
     with db() as con:
-        if not fetchone(con,"SELECT id FROM users WHERE username=%s",(username,)): return err("USER NOT FOUND")
-        execute(con,"INSERT INTO private_room_members(room_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(rid,username))
+        if not fetchone(con,"SELECT id FROM ogl_users WHERE username=%s",(username,)): return err("USER NOT FOUND")
+        execute(con,"INSERT INTO ogl_private_room_members(room_id,username) VALUES(%s,%s) ON CONFLICT DO NOTHING",(rid,username))
     return ok()
 @app.route("/api/private/remove-member",methods=["POST"])
 def api_private_remove_member():
     if e:=require_admin(): return e
     d=request.json or {};rid,username=d.get("room_id"),d.get("username","").strip()
     if not rid or not username: return err("MISSING FIELDS")
-    with db() as con: execute(con,"DELETE FROM private_room_members WHERE room_id=%s AND username=%s",(rid,username))
+    with db() as con: execute(con,"DELETE FROM ogl_private_room_members WHERE room_id=%s AND username=%s",(rid,username))
     return ok()
 @app.route("/api/private/rename",methods=["POST"])
 def api_private_rename():
     if e:=require_admin(): return e
     d=request.json or {};rid,name=d.get("id"),d.get("name","").strip().upper()
     if not rid or not name: return err("MISSING FIELDS")
-    with db() as con: execute(con,"UPDATE private_rooms SET name=%s WHERE id=%s",(name,rid))
+    with db() as con: execute(con,"UPDATE ogl_private_rooms SET name=%s WHERE id=%s",(name,rid))
     return ok()
 @app.route("/api/notifications")
 def api_notifications():
@@ -1050,16 +1046,16 @@ def api_notifications():
     u=me()
     with db() as con:
         read_dm_at=read_at_map(con,u,'dm')
-        senders=[r[0] for r in fetchall(con,"SELECT DISTINCT sender FROM messages WHERE recipient=%s",(u,))]
-        dm_unread=sum(fetchone(con,"SELECT COUNT(*) FROM messages WHERE sender=%s AND recipient=%s AND timestamp>%s",(s,u,read_dm_at.get(s,'1970-01-01')))[0] for s in senders)
-        group_rows=fetchall(con,"SELECT id,name FROM groups WHERE id IN (SELECT group_id FROM group_members WHERE username=%s) ORDER BY id",(u,))
+        senders=[r[0] for r in fetchall(con,"SELECT DISTINCT sender FROM ogl_messages WHERE recipient=%s",(u,))]
+        dm_unread=sum(fetchone(con,"SELECT COUNT(*) FROM ogl_messages WHERE sender=%s AND recipient=%s AND timestamp>%s",(s,u,read_dm_at.get(s,'1970-01-01')))[0] for s in senders)
+        group_rows=fetchall(con,"SELECT id,name FROM ogl_groups WHERE id IN (SELECT group_id FROM ogl_group_members WHERE username=%s) ORDER BY id",(u,))
         read_grp_at=read_at_map(con,u,'group')
         groups_unread={str(gid):{"name":gname,"count":cnt} for gid,gname in group_rows for cnt in [unread_count(con,'group_messages','group_id',gid,u,read_grp_at.get(str(gid),'1970-01-01'))] if cnt}
-        priv_rows=fetchall(con,"SELECT id,name FROM private_rooms ORDER BY id") if is_admin(u) else fetchall(con,"SELECT r.id,r.name FROM private_rooms r JOIN private_room_members m ON r.id=m.room_id WHERE m.username=%s ORDER BY r.id",(u,))
+        priv_rows=fetchall(con,"SELECT id,name FROM ogl_private_rooms ORDER BY id") if is_admin(u) else fetchall(con,"SELECT r.id,r.name FROM ogl_private_rooms r JOIN ogl_private_room_members m ON r.id=m.room_id WHERE m.username=%s ORDER BY r.id",(u,))
         read_prv_at=read_at_map(con,u,'private')
         privrooms_unread={str(rid):{"name":rname,"count":cnt} for rid,rname in priv_rows for cnt in [unread_count(con,'private_room_messages','room_id',rid,u,read_prv_at.get(str(rid),'1970-01-01'))] if cnt}
-        posts_read=fetchone(con,"SELECT read_at FROM chat_read_at WHERE username=%s AND chat_type='posts' AND chat_id='posts'",(u,))
-        new_posts=fetchone(con,"SELECT COUNT(*) FROM posts WHERE username!=%s AND created_at>%s",(u,posts_read[0] if posts_read else '1970-01-01'))[0]
+        posts_read=fetchone(con,"SELECT read_at FROM ogl_chat_read_at WHERE username=%s AND chat_type='posts' AND chat_id='posts'",(u,))
+        new_posts=fetchone(con,"SELECT COUNT(*) FROM ogl_posts WHERE username!=%s AND created_at>%s",(u,posts_read[0] if posts_read else '1970-01-01'))[0]
     group_total=sum(v["count"] for v in groups_unread.values());priv_total=sum(v["count"] for v in privrooms_unread.values())
     return ok(dm=dm_unread,groups=groups_unread,group=group_total,private_rooms=privrooms_unread,private=priv_total,posts=new_posts,total=dm_unread+group_total+priv_total+new_posts)
 @app.route("/api/mark-read",methods=["POST"])
@@ -1069,17 +1065,17 @@ def api_mark_read():
     if not chat_type or not chat_id: return err("MISSING FIELDS")
     now=datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     with db() as con:
-        execute(con,"INSERT INTO chat_read_at(username,chat_type,chat_id,read_at) VALUES(%s,%s,%s,%s) ON CONFLICT (username,chat_type,chat_id) DO UPDATE SET read_at=EXCLUDED.read_at",(me(),chat_type,chat_id,now))
-        if chat_type=="dm": execute(con,"UPDATE messages SET read=1 WHERE recipient=%s AND sender=%s",(me(),chat_id))
+        execute(con,"INSERT INTO ogl_chat_read_at(username,chat_type,chat_id,read_at) VALUES(%s,%s,%s,%s) ON CONFLICT (username,chat_type,chat_id) DO UPDATE SET read_at=EXCLUDED.read_at",(me(),chat_type,chat_id,now))
+        if chat_type=="dm": execute(con,"UPDATE ogl_messages SET read=1 WHERE recipient=%s AND sender=%s",(me(),chat_id))
     return ok()
 @app.route("/api/reset/request",methods=["POST"])
 def api_reset_request():
     username=(request.json or {}).get("username","").strip()
     if not username: return err("USERNAME REQUIRED")
     with db() as con:
-        if not fetchone(con,"SELECT id FROM users WHERE username=%s",(username,)): return err("USERNAME NOT FOUND")
-        if fetchone(con,"SELECT id FROM password_resets WHERE username=%s AND status='pending'",(username,)): return ok()
-        execute(con,"INSERT INTO password_resets(username) VALUES(%s)",(username,))
+        if not fetchone(con,"SELECT id FROM ogl_users WHERE username=%s",(username,)): return err("USERNAME NOT FOUND")
+        if fetchone(con,"SELECT id FROM ogl_password_resets WHERE username=%s AND status='pending'",(username,)): return ok()
+        execute(con,"INSERT INTO ogl_password_resets(username) VALUES(%s)",(username,))
     return ok()
 @app.route("/api/push/vapid-public-key")
 def api_vapid_public_key(): return ok(key=VAPID_PUBLIC_KEY)
@@ -1088,14 +1084,14 @@ def api_push_subscribe():
     if e:=require_login(): return e
     d=request.json or {};endpoint=d.get("endpoint","");p256dh=d.get("keys",{}).get("p256dh","");auth=d.get("keys",{}).get("auth","")
     if not endpoint or not p256dh or not auth: return err("MISSING FIELDS")
-    with db() as con: execute(con,"INSERT INTO push_subscriptions(username,endpoint,p256dh,auth) VALUES(%s,%s,%s,%s) ON CONFLICT (username,endpoint) DO UPDATE SET p256dh=EXCLUDED.p256dh,auth=EXCLUDED.auth",(me(),endpoint,p256dh,auth))
+    with db() as con: execute(con,"INSERT INTO ogl_push_subscriptions(username,endpoint,p256dh,auth) VALUES(%s,%s,%s,%s) ON CONFLICT (username,endpoint) DO UPDATE SET p256dh=EXCLUDED.p256dh,auth=EXCLUDED.auth",(me(),endpoint,p256dh,auth))
     return ok()
 @app.route("/api/push/unsubscribe",methods=["POST"])
 def api_push_unsubscribe():
     if e:=require_login(): return e
     endpoint=(request.json or {}).get("endpoint","")
     if endpoint:
-        with db() as con: execute(con,"DELETE FROM push_subscriptions WHERE username=%s AND endpoint=%s",(me(),endpoint))
+        with db() as con: execute(con,"DELETE FROM ogl_push_subscriptions WHERE username=%s AND endpoint=%s",(me(),endpoint))
     return ok()
 @app.route("/api/ask",methods=["POST"])
 def api_ask():
@@ -1112,19 +1108,19 @@ def api_ask():
     except Exception: return ok(answer="")
 @app.route("/manifest.json")
 def manifest():
-    data={"name":"Vox Populi","short_name":"VOX","description":"Vox Populi Community","start_url":"/","display":"standalone","background_color":"#000000","theme_color":"#00ff00","orientation":"portrait-primary","icons":[{"src":"/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},{"src":"/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}],"categories":["social","news"],"shortcuts":[{"name":"Chat","url":"/","description":"Open Vox community chat"}]}
+    data={"name":"Off Grid Life","short_name":"OGL","description":"Off Grid Life Community","start_url":"/","display":"standalone","background_color":"#000000","theme_color":"#00ff00","orientation":"portrait-primary","icons":[{"src":"/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},{"src":"/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}],"categories":["social","news"],"shortcuts":[{"name":"Chat","url":"/","description":"Open Off Grid Life community"}]}
     return Response(_json.dumps(data),mimetype="application/json")
 @app.route("/sw.js")
 def service_worker():
-    sw="""const CACHE='vox-v1';
+    sw="""const CACHE='ogl-v1';
 self.addEventListener('install',e=>{self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim();});
 self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;if(e.request.url.includes('/api/'))return;e.respondWith(fetch(e.request).then(res=>{const clone=res.clone();caches.open(CACHE).then(c=>c.put(e.request,clone));return res;}).catch(()=>caches.match(e.request).then(r=>r||Response.error())));});
-self.addEventListener('push',e=>{let data={title:'VOX',body:'New notification',tag:'vox'};try{data=e.data.json();}catch(err){}e.waitUntil(self.registration.showNotification('VOX // '+data.title,{body:data.body,icon:'/icon-192.png',badge:'/icon-192.png',tag:data.tag,renotify:true,vibrate:[200,100,200],data:{url:'/'}}));});
+self.addEventListener('push',e=>{let data={title:'VOX',body:'New notification',tag:'vox'};try{data=e.data.json();}catch(err){}e.waitUntil(self.registration.showNotification('OGL // '+data.title,{body:data.body,icon:'/icon-192.png',badge:'/icon-192.png',tag:data.tag,renotify:true,vibrate:[200,100,200],data:{url:'/'}}));});
 self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(self.location.origin)){c.focus();return;}}clients.openWindow('/');}));});"""
     return Response(sw,mimetype="application/javascript")
 def _svg_icon(size,text_y,font_size,sub_y=None,sub_text=None):
-    txt=f'<text x="{size//2}" y="{text_y}" text-anchor="middle" font-family="monospace" font-weight="900" font-size="{font_size}" fill="#00ff00" letter-spacing="2">VOX</text>'
+    txt=f'<text x="{size//2}" y="{text_y}" text-anchor="middle" font-family="monospace" font-weight="900" font-size="{font_size}" fill="#00ff00" letter-spacing="2">OGL</text>'
     sub=(f'<text x="{size//2}" y="{sub_y}" text-anchor="middle" font-family="monospace" font-size="{font_size//4}" fill="#00ff00" opacity="0.6" letter-spacing="6">{sub_text}</text>' if sub_text else '')
     r=size//2;cr=int(r*0.85)
     svg=f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}"><rect width="{size}" height="{size}" fill="#000"/><circle cx="{r}" cy="{r}" r="{cr}" fill="none" stroke="#00ff00" stroke-width="{max(4,size//48)}"/>{txt}{sub}</svg>'.encode()
@@ -1134,12 +1130,12 @@ def _svg_icon(size,text_y,font_size,sub_y=None,sub_text=None):
 @app.route("/icon-192.png")
 def icon_192(): return _svg_icon(192,108,34)
 @app.route("/icon-512.png")
-def icon_512(): return _svg_icon(512,285,90,sub_y=325,sub_text="VOX POPULI")
+def icon_512(): return _svg_icon(512,285,90,sub_y=325,sub_text="Off Grid Life")
 @app.route("/reset-x7k9m2p4q8w3n6j1vb5")
 def emergency_reset():
-    new_pw="Vox2024!"
-    with db() as con: execute(con,"UPDATE users SET password_hash=%s WHERE username=%s",(hash_pw(new_pw),ADMIN_USER))
-    return "<h1 style='font-family:monospace;background:#000;color:#0f0;padding:40px;'>DONE! Login: Eagleone / Vox2024! — CHANGE YOUR PASSWORD AFTER LOGGING IN.</h1>"
+    new_pw="OGL2024!"
+    with db() as con: execute(con,"UPDATE ogl_users SET password_hash=%s WHERE username=%s",(hash_pw(new_pw),ADMIN_USER))
+    return "<h1 style='font-family:monospace;background:#000;color:#0f0;padding:40px;'>DONE! Login: Eagleone / OGL2024! — CHANGE YOUR PASSWORD AFTER LOGGING IN.</h1>"
 @app.errorhandler(Exception)
 def handle_exception(e):
     import traceback;app.logger.error(traceback.format_exc())
@@ -1174,7 +1170,7 @@ def _sec_save_state(s):
 def _sec_get_session():
     import requests as _req
     s=_req.Session()
-    s.headers.update({"User-Agent":"VoxSecBot/1.0"})
+    s.headers.update({"User-Agent":"OGLSecBot/1.0"})
     if not _SEC_TARGET or not _SEC_USERNAME or not _SEC_PASSWORD_ENC:
         return s
     try:
@@ -1196,7 +1192,7 @@ def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
     sess=_sec_get_session()
     base=base_url.rstrip("/")
     # seed with known routes so JS-rendered pages are always covered
-    seed=[base+r for r in _SEC_KNOWN_ROUTES]+[base_url.rstrip("/")]
+    seed=[base+r for r in _SEC_KNOWN_ROUTES]
     visited,queue=[],seed;seen=set()
     domain=urllib.parse.urlparse(base_url).netloc
     _skip=['/api/news','/api/dm','/api/groups','/api/posts','/api/private','/api/notifications','/api/online','/api/traffic']
@@ -1204,6 +1200,7 @@ def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
         url=queue.pop(0)
         if url in seen: continue
         seen.add(url)
+        # skip news feed and other API endpoints from being crawled
         if any(s in url for s in _skip): seen.add(url);visited.append(url);continue
         try:
             r=sess.get(url,timeout=8,allow_redirects=True)
@@ -1212,6 +1209,7 @@ def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
             for a in soup.find_all("a",href=True):
                 full=urllib.parse.urljoin(url,a["href"])
                 parsed=urllib.parse.urlparse(full)
+                # follow same-domain links but skip news feed routes
                 if parsed.netloc==domain and full not in seen and not any(s in full for s in _skip):
                     queue.append(full)
             time.sleep(2)
@@ -1263,13 +1261,13 @@ def _sec_harmful(pages,sess):
     # 2. scan DB: board posts
     try:
         with db() as con:
-            for row in fetchall(con,"SELECT username,content,created_at FROM posts"):
+            for row in fetchall(con,"SELECT username,content,created_at FROM ogl_posts"):
                 uname,content,ts=row
                 text=content.lower()
                 hits=[kw for kw in _HARMFUL_KEYWORDS if re.search(r'\b'+re.escape(kw)+r'\b',text)]
                 if hits: findings.append({"source":"post","url":"Community Board","keywords":hits,"username":uname,"message":content,"timestamp":str(ts)})
             # group channel messages
-            for row in fetchall(con,"SELECT gm.sender,g.name,gm.content_enc,gm.timestamp FROM group_messages gm JOIN groups g ON gm.group_id=g.id ORDER BY gm.id DESC LIMIT 500"):
+            for row in fetchall(con,"SELECT gm.sender,g.name,gm.content_enc,gm.timestamp FROM ogl_group_messages gm JOIN ogl_groups g ON gm.group_id=g.id ORDER BY gm.id DESC LIMIT 500"):
                 sender,gname,enc_content,ts=row
                 try:
                     content=dec(enc_content)
@@ -1283,6 +1281,7 @@ def _sec_harmful(pages,sess):
     return findings
 
 def _sec_ai_analysis(report, ai_only=None):
+    # Build a minimal summary string for Gemini
     ssl=report.get("ssl",{})
     broken=len(report.get("broken_links",[]))
     harmful=report.get("harmful_content",[])[:5]
@@ -1359,7 +1358,7 @@ def _sec_run_scan(ai_only=None):
     # Notify admin via push if critical
     if report["is_critical"]:
         summary=f"⚠ SECURITY ALERT: {len(harmful)} harmful, {len(broken)} broken links, SSL={'OK' if ssl_result.get('ok') else 'ISSUE'}"
-        send_push(ADMIN_USER,"🚨 VOX SECURITY HUB",summary,tag="security")
+        send_push(ADMIN_USER,"🚨 OGL SECURITY HUB",summary,tag="security")
     # Persist
     _sec_save_state(state)
     reports=[]
@@ -1372,7 +1371,7 @@ def _sec_run_scan(ai_only=None):
 # ── Auto-scan background thread ───────────────────────────────────────────────
 def _sec_scheduler():
     import time as _time
-    _time.sleep(30)  # give app time to start
+    _time.sleep(600)  # wait 10 minutes after startup before first scan
     while True:
         if _SEC_TARGET:
             try:
@@ -1401,7 +1400,7 @@ def api_sec_reports():
 def api_sec_scan():
     if e:=require_admin(): return e
     if _SEC_LOCK.locked(): return err("SCAN ALREADY RUNNING")
-    ai_only=(request.json or {}).get("ai",None)
+    ai_only=(request.json or {}).get("ai",None)  # "claude", "gemini", or None (both)
     def _run():
         with _SEC_LOCK: _sec_run_scan(ai_only=ai_only)
     threading.Thread(target=_run,daemon=True).start()
@@ -1559,7 +1558,6 @@ function secDismissAlert(){
   if(banner)banner.style.display='none';
   const btn=document.getElementById('secDismissBtn');
   if(btn)btn.style.display='none';
-  // restore theme from CSS variable defaults
   document.body.style.removeProperty('--p');
   document.body.style.removeProperty('--bg');
   document.body.style.removeProperty('--ac');
