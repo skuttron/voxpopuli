@@ -1254,7 +1254,7 @@ def _sec_content_changes(pages,state,sess):
 
 def _sec_harmful(pages,sess):
     findings=[]
-    # 1. scan public pages
+    # scan public pages only
     for url in pages:
         try:
             r=sess.get(url,timeout=8)
@@ -1262,26 +1262,6 @@ def _sec_harmful(pages,sess):
             hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
             if hits: findings.append({"source":"page","url":url,"keywords":hits,"username":"","message":""})
         except Exception: pass
-    # 2. scan DB messages directly
-    try:
-        with db() as con:
-            # board posts
-            for row in fetchall(con,"SELECT username,content,created_at FROM posts"):
-                uname,content,ts=row
-                text=content.lower()
-                hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
-                if hits: findings.append({"source":"post","url":"Board Post","keywords":hits,"username":uname,"message":content,"timestamp":str(ts)})
-            # group messages
-            for row in fetchall(con,"SELECT gm.sender,g.name,gm.content_enc,gm.timestamp FROM group_messages gm JOIN groups g ON gm.group_id=g.id"):
-                sender,gname,enc_content,ts=row
-                try:
-                    content=dec(enc_content)
-                    text=content.lower()
-                    hits=[kw for kw in _HARMFUL_KEYWORDS if kw in text]
-                    if hits: findings.append({"source":"channel","url":f"#{gname}","keywords":hits,"username":sender,"message":content,"timestamp":str(ts)})
-                except Exception: pass
-    except Exception as e:
-        app.logger.warning(f"SecBot DB scan error: {e}")
     return findings
 
 def _sec_ai_analysis(report):
@@ -1410,12 +1390,13 @@ def security_dashboard():
 <div style="border:2px solid var(--p);border-radius:var(--r);padding:20px;margin-bottom:20px;background:var(--p10);">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
     <h2 style="margin:0;letter-spacing:4px;font-size:clamp(14px,3vw,20px);">&#128737; SECURITY HUB</h2>
-    <div style="display:flex;gap:8px;align-items:center;">
+    <div id="secHeaderBtns" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <a href="/" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 14px;color:var(--p);background:var(--p10);font-family:'Courier New',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;" onmouseover="this.style.background='var(--p)';this.style.color='#000'" onmouseout="this.style.background='var(--p10)';this.style.color='var(--p)'">&#8962; HOME</a>
       <span id="secTarget" style="font-size:10px;opacity:.5;"></span>
       <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 18px;font-size:11px;">&#9654; SCAN NOW</button>
     </div>
   </div>
+  <style>@media(max-width:600px){#secHeaderBtns{width:100%;justify-content:flex-start;}}</style>
   <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;</div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;">
     <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
