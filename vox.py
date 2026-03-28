@@ -176,8 +176,8 @@ def theme_css(t):
         ".hero-btn{border:2px solid var(--p);border-radius:10px;padding:10px 20px;color:var(--p);background:var(--p10);cursor:pointer;font-family:'Courier New',monospace;font-size:15px;font-weight:bold;text-transform:uppercase;letter-spacing:2px;white-space:nowrap;box-shadow:0 0 18px var(--p30);transition:.2s}",
         ".hero-btn:hover{background:var(--p);color:#000;box-shadow:0 0 30px var(--p)}",
         ".tile-grid{display:inline-grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:4px;margin:8px 0;position:relative;z-index:2;box-sizing:border-box;padding:2px 0;width:100%}",
-        ".tile{border:2px solid var(--p);border-radius:12px;padding:14px 4px;background:var(--p10);color:var(--p);text-decoration:none;transition:.25s;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 0 12px var(--p30);text-align:center;position:relative;z-index:2;width:100%}",
-        ".tile:hover{background:var(--p);color:#000;box-shadow:0 0 24px var(--p);transform:scale(1.04)}.tile i{font-size:18px;margin-bottom:6px}.tile div{font-size:8px;letter-spacing:1px}",
+        ".tile{border:2px solid var(--p);border-radius:8px;padding:8px 2px;background:transparent;color:var(--p);text-decoration:none;transition:.25s;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 0 8px var(--p30);text-align:center;position:relative;z-index:2;width:100%}",
+        ".tile:hover{background:var(--p);color:#000;box-shadow:0 0 20px var(--p);transform:scale(1.04)}.tile i{font-size:13px;margin-bottom:3px}.tile div{font-size:8px;letter-spacing:1px}",
         ".content-box{width:min(100%,900px);box-sizing:border-box;margin:24px auto;padding:24px 30px;border:2px dashed var(--p);border-radius:var(--r);box-shadow:0 0 8px var(--p30);font-size:17px;background:transparent;line-height:1.7;position:relative;z-index:2}",
         ".three-column-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;padding:0 16px;margin:0 auto 24px;position:relative;z-index:2;width:min(100%,900px);box-sizing:border-box}",
         ".column{border:3px solid var(--p);border-radius:var(--r);padding:24px 20px;background:transparent;box-shadow:0 0 20px var(--p30);display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;z-index:2}",
@@ -222,32 +222,27 @@ def theme_css(t):
         ".search-input:focus{outline:none;box-shadow:0 0 24px var(--p)}.search-btn{border:2px solid var(--p);border-radius:30px;padding:11px 22px;background:var(--p10);color:var(--p);cursor:pointer;font-family:'Courier New',monospace;font-size:13px;text-transform:uppercase;transition:.2s;white-space:nowrap}",
         ".search-btn:hover{background:var(--p);color:#000;box-shadow:0 0 20px var(--p)}",
         "@media(max-width:700px){",
-        ".title-row-wrap{padding:8px 8px 0}.logo-wrap{padding:12px 0 6px}",
-        "._LOGO_SVG svg,svg{max-width:min(320px,88vw)!important;height:auto!important}",
-        ".title-row{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;margin:0 0 12px}",
-        ".title-center{flex:1}.title-row-right{display:flex;gap:6px;flex-shrink:0}",
-        ".hero-btn{font-size:16px;padding:13px 20px;letter-spacing:1px;border-radius:10px;border-width:3px}.menu-trigger{font-size:15px;padding:12px 18px;border-width:3px}",
-        ".traffic-counter{top:6px;right:6px;padding:5px 12px;font-size:12px;line-height:1.6;display:flex;flex-direction:row;gap:10px;align-items:center}.tc-row{gap:6px}.tc-label{font-size:11px}.tc-val{font-size:13px}",
-        ".tile-grid{display:grid!important;grid-template-columns:repeat(4,1fr)!important;gap:10px!important;padding:0 6px!important;box-sizing:border-box;margin:10px 0;width:100%}",
-        ".tile{padding:22px 4px!important;border-radius:14px!important;width:100%!important;flex:none!important;min-width:0!important;max-width:none!important;border-width:3px!important;box-shadow:0 0 20px var(--p30)!important}.tile i{font-size:30px!important;margin-bottom:10px!important}.tile div{font-size:12px!important;letter-spacing:0!important;line-height:1.3!important}",
-        ".search-box{width:100%!important;margin:0 0 16px!important;box-sizing:border-box!important;padding:0 4px!important}.search-input{font-size:16px!important;padding:14px 18px!important}.search-btn{font-size:16px!important;padding:14px 18px!important}",
-        ".content-box{width:100%!important;padding:20px 18px!important;font-size:17px!important;line-height:1.8!important;margin:14px 0!important;box-sizing:border-box!important;border-width:3px!important}",
-        ".three-column-grid{grid-template-columns:1fr!important;gap:14px!important;padding:4px!important;margin-bottom:16px!important}.column{padding:22px 18px!important;border-width:3px!important}.column h3{font-size:18px!important}.column p{font-size:16px!important}.btn-action{font-size:16px!important;padding:14px 22px!important;margin-top:14px!important;border-width:2px!important}",
-        ".modal-overlay{padding:12px;align-items:center}.modal-box{max-width:99%;width:100%;border-radius:var(--r);padding:24px 20px;margin:auto;max-height:93vh;overflow-y:auto}",
-        ".modal-box h2{font-size:18px;letter-spacing:3px;margin-bottom:14px}.field-plain{font-size:16px;padding:14px 14px}.field{font-size:16px;padding:14px 44px 14px 14px}.theme-grid{gap:8px}.theme-btn{font-size:13px;padding:10px 4px}",
-        ".dropdown-menu{min-width:220px;left:auto;right:0;z-index:9999}.dropdown-item{padding:16px 18px;font-size:16px}",
-        "#adminContent{max-height:260px}",
+        ".title-row-wrap{padding:10px 8px 0}.logo-wrap{padding:12px 0 6px}",
+        ".title-row{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:6px;margin:0 0 10px}",
+        ".title-center{flex:1}.title-row-right{display:flex;gap:5px;flex-shrink:0}",
+        ".hero-btn{font-size:10px;padding:5px 8px;letter-spacing:0;border-radius:7px}.menu-trigger{font-size:10px;padding:5px 8px}",
+        ".traffic-counter{top:6px;right:6px;padding:3px 8px;font-size:8px;line-height:1.4;display:flex;flex-direction:row;gap:8px;align-items:center}.tc-row{gap:4px}",
+        ".tile-grid{display:inline-grid!important;grid-template-columns:repeat(4,minmax(48px,auto))!important;gap:4px!important;padding:0 4px!important;box-sizing:border-box;margin:8px 0}",
+        ".tile{padding:7px 2px;border-radius:6px;width:100%;flex:none;min-width:0;max-width:none;font-size:8px}.tile i{font-size:12px;margin-bottom:3px}.tile div{font-size:8px;letter-spacing:0}",
+        ".search-box{width:100%;margin:0 0 14px;box-sizing:border-box}.search-input{font-size:11px;padding:9px 12px}.search-btn{font-size:11px;padding:9px 12px}",
+        ".content-box{width:100%;padding:12px 14px;font-size:13px;line-height:1.6;margin:12px 0;box-sizing:border-box}",
+        ".three-column-grid{grid-template-columns:1fr;gap:10px;padding:2px;margin-bottom:12px}.column{padding:14px 12px}.column h3{font-size:12px}.column p{font-size:12px}.btn-action{font-size:11px;padding:7px 14px;margin-top:10px}",
+        ".modal-overlay{padding:20px;align-items:center}.modal-box{max-width:96%;width:100%;border-radius:var(--r);padding:20px 16px;margin:auto;max-height:90vh;overflow-y:auto}",
+        ".modal-box h2{font-size:13px;letter-spacing:2px;margin-bottom:10px}.field-plain{font-size:12px;padding:9px 10px}.field{font-size:12px;padding:9px 36px 9px 10px}.theme-grid{gap:5px}.theme-btn{font-size:9px;padding:6px 2px}",
+        ".dropdown-menu{min-width:170px;left:auto;right:0;z-index:9999}.dropdown-item{padding:10px 12px;font-size:11px}",
+        "#adminContent{max-height:180px}",
         ".comms-layout{display:flex;flex-direction:column;min-height:0}",
-        ".comms-sidebar{border-right:0;border-bottom:2px solid var(--p);display:none;min-height:0;overflow-y:auto;max-height:320px}.comms-sidebar.mobile-show{display:flex;flex-direction:column}",
+        ".comms-sidebar{border-right:0;border-bottom:2px solid var(--p);display:none;min-height:0;overflow-y:auto;max-height:280px}.comms-sidebar.mobile-show{display:flex;flex-direction:column}",
         ".comms-main{display:none;flex-direction:column;min-height:0;flex:1}.comms-main.mobile-show{display:flex}",
-        ".conv-list{flex:1;overflow-y:auto}.conv-item{padding:18px 16px;font-size:16px}",
-        ".comms-messages{flex:1;min-height:0;max-height:none;padding:16px;overflow-y:auto}",
-        ".bubble{font-size:17px;padding:14px 18px}.bubble-content{max-width:86%}.bubble-avatar{width:36px;height:36px;font-size:13px}.comms-compose input{font-size:16px;padding:14px 18px}",
-        ".send-btn{padding:14px 18px;font-size:15px}.mobile-back-btn{display:flex!important}",
-        ".tab{font-size:15px;padding:14px 6px}.tab-bar{border-bottom-width:2px}",
-        "#newsFeed a{font-size:15px!important}#newsFeed{font-size:14px!important}",
-        ".section-label{font-size:13px}.comms-sidebar-header{font-size:13px}",
-        ".comms-thread-header{font-size:15px;padding:14px 16px}",
+        ".conv-list{flex:1;overflow-y:auto}.conv-item{padding:14px 12px;font-size:13px}",
+        ".comms-messages{flex:1;min-height:0;max-height:none;padding:12px;overflow-y:auto}",
+        ".bubble{font-size:15px;padding:11px 15px}.bubble-content{max-width:82%}.bubble-avatar{width:30px;height:30px;font-size:10px}.comms-compose input{font-size:14px;padding:12px 14px}",
+        ".send-btn{padding:11px 14px;font-size:12px}.mobile-back-btn{display:flex!important}",
         "}@media(min-width:701px){.mobile-back-btn{display:none!important}.comms-sidebar,.comms-main{display:flex}}",
     ])
 def pw_field(fid,ph,ac="current-password"):
@@ -264,7 +259,7 @@ def cyber_box(title,body,*,title_right="",extra_header="",footer="",radius="var(
             f'{extra_header}'
             f'<div style="border:2px solid var(--p);border-top:none;border-radius:0 0 {radius} {radius};{mh}{body_style}">{body}</div>'
             f'{footer}</div>')
-_LOGO_SVG="""<svg viewBox="0 0 400 420" width="260" height="273" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;max-width:min(260px,80vw);height:auto;"><defs><style>@keyframes spinFwd{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes spinRev{from{transform:rotate(0deg)}to{transform:rotate(-360deg)}}@keyframes fireGlow{0%,100%{filter:drop-shadow(0 0 2px var(--p))}50%{filter:drop-shadow(0 0 4px var(--p))}}.orbit-a{transform-origin:200px 195px;animation:spinFwd 8s linear infinite}.orbit-b{transform-origin:200px 195px;animation:spinRev 12s linear infinite}.logo-badge{animation:fireGlow 2.2s ease-in-out infinite}</style><radialGradient id="lgbgG" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="var(--ac)"/><stop offset="100%" stop-color="#000a06"/></radialGradient><radialGradient id="lgrimG" cx="50%" cy="35%" r="65%"><stop offset="0%" stop-color="var(--p)" stop-opacity="0.15"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient><filter id="lgglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter><clipPath id="lgcirc"><circle cx="200" cy="195" r="122"/></clipPath><path id="lgarcB" d="M 98,238 A 112,112 0 0,0 302,238"/></defs>
+_LOGO_SVG="""<svg viewBox="0 0 400 420" width="260" height="273" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;"><defs><style>@keyframes spinFwd{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes spinRev{from{transform:rotate(0deg)}to{transform:rotate(-360deg)}}@keyframes fireGlow{0%,100%{filter:drop-shadow(0 0 2px var(--p))}50%{filter:drop-shadow(0 0 4px var(--p))}}.orbit-a{transform-origin:200px 195px;animation:spinFwd 8s linear infinite}.orbit-b{transform-origin:200px 195px;animation:spinRev 12s linear infinite}.logo-badge{animation:fireGlow 2.2s ease-in-out infinite}</style><radialGradient id="lgbgG" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="var(--ac)"/><stop offset="100%" stop-color="#000a06"/></radialGradient><radialGradient id="lgrimG" cx="50%" cy="35%" r="65%"><stop offset="0%" stop-color="var(--p)" stop-opacity="0.15"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient><filter id="lgglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter><clipPath id="lgcirc"><circle cx="200" cy="195" r="122"/></clipPath><path id="lgarcB" d="M 98,238 A 112,112 0 0,0 302,238"/></defs>
 <g stroke="var(--p)" stroke-width="1.2" opacity="0.45"><line x1="200" y1="16" x2="200" y2="32"/><line x1="200" y1="358" x2="200" y2="374"/><line x1="28" y1="195" x2="44" y2="195"/><line x1="356" y1="195" x2="372" y2="195"/><line x1="64" y1="71" x2="75" y2="82"/><line x1="336" y1="71" x2="325" y2="82"/><line x1="64" y1="319" x2="75" y2="308"/><line x1="336" y1="319" x2="325" y2="308"/></g>
 <circle cx="200" cy="195" r="158" fill="#050a08" stroke="var(--p)" stroke-width="1.5" opacity="0.5"/><circle cx="200" cy="195" r="151" fill="none" stroke="var(--p)" stroke-width="0.4" opacity="0.25"/>
 <g class="orbit-a"><ellipse cx="200" cy="195" rx="144" ry="50" fill="none" stroke="var(--p)" stroke-width="1.8" opacity="0.65" filter="url(#lgglow)" transform="rotate(-25 200 195)"/><ellipse cx="200" cy="195" rx="144" ry="50" fill="none" stroke="var(--p)" stroke-width="1.0" opacity="0.35" transform="rotate(25 200 195)"/><ellipse cx="200" cy="195" rx="144" ry="50" fill="none" stroke="var(--p)" stroke-width="0.6" opacity="0.2" transform="rotate(75 200 195)"/></g>
@@ -430,7 +425,7 @@ if($('dmConvList')){{['tabContentDM','tabContentGroup','tabContentPrivate','tabC
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#00ff00">
@@ -1154,7 +1149,7 @@ def handle_exception(e):
 # ══════════════════════════════════════════════════════════════════════════════
 _SEC_TARGET      = os.environ.get("TARGET_URL","")         # site to scan (set in Railway vars)
 _SEC_MAX_PAGES   = int(os.environ.get("SEC_MAX_PAGES","80"))
-_SEC_INTERVAL    = int(os.environ.get("SEC_INTERVAL_MINS","120"))
+_SEC_INTERVAL    = int(os.environ.get("SEC_INTERVAL_MINS","60"))
 _SEC_USERNAME    = os.environ.get("SEC_USERNAME","")       # admin username for scanner login
 _SEC_PASSWORD_ENC= os.environ.get("SEC_PASSWORD_ENC","")  # Fernet-encrypted password for scanner
 _SEC_STATE_FILE  = str(_BASE/"sec_state.json")
@@ -1361,18 +1356,14 @@ def _sec_run_scan():
     return report
 
 # ── Auto-scan background thread ───────────────────────────────────────────────
-_SEC_NEXT_SCAN=None
-
 def _sec_scheduler():
-    global _SEC_NEXT_SCAN
     import time as _time
-    _time.sleep(30)
+    _time.sleep(30)  # give app time to start
     while True:
         if _SEC_TARGET:
             try:
                 with _SEC_LOCK: _sec_run_scan()
             except Exception as e: app.logger.error(f"Security scan error: {e}")
-        _SEC_NEXT_SCAN=datetime.datetime.utcnow()+datetime.timedelta(minutes=_SEC_INTERVAL)
         _time.sleep(_SEC_INTERVAL*60)
 
 threading.Thread(target=_sec_scheduler,daemon=True).start()
@@ -1409,70 +1400,58 @@ def api_sec_status():
         with open(_SEC_REPORTS_FILE) as f:
             rpts=_json.load(f)
             if rpts: last=rpts[0].get("timestamp")
-    return ok(scanning=_SEC_LOCK.locked(),last_scan=last,target=_SEC_TARGET,interval=_SEC_INTERVAL,next_scan=_SEC_NEXT_SCAN.isoformat() if _SEC_NEXT_SCAN else None)
+    return ok(scanning=_SEC_LOCK.locked(),last_scan=last,target=_SEC_TARGET,interval=_SEC_INTERVAL)
 
 @app.route("/security")
 def security_dashboard():
     if not is_admin(): return redirect("/")
     user=me();theme=session.get("theme","green")
-    content='''<div style="width:100%;max-width:960px;margin:0 auto;padding:10px;box-sizing:border-box;">
-<div style="border:2px solid var(--p);border-radius:var(--r);padding:14px;background:var(--p10);">
-
-  <!-- HEADER -->
-  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
-    <div style="display:flex;align-items:center;gap:10px;">
-      <a href="/" style="display:inline-flex;align-items:center;gap:4px;border:2px solid var(--p);border-radius:8px;padding:5px 12px;color:var(--p);background:var(--p10);font-family:\'Courier New\',monospace;font-size:11px;font-weight:bold;text-decoration:none;" onmouseover="this.style.background=\'var(--p)\';this.style.color=\'#000\'" onmouseout="this.style.background=\'var(--p10)\';this.style.color=\'var(--p)\'">&#8962; HOME</a>
-      <h2 style="margin:0;letter-spacing:3px;font-size:clamp(13px,2.5vw,18px);">&#128737; SECURITY HUB</h2>
-    </div>
-    <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 16px;font-size:11px;">&#9654; SCAN NOW</button>
-  </div>
-
-  <!-- ALERT BANNER -->
-  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px;border-radius:8px;text-align:center;font-size:11px;letter-spacing:2px;margin-bottom:12px;animation:tcPulse 1.5s infinite;">&#9888; CRITICAL SECURITY ISSUES DETECTED &#9888;</div>
-
-  <!-- STAT ROWS -->
-  <div style="border:1px solid var(--p30);border-radius:8px;overflow:hidden;margin-bottom:12px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--p30);">
-      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">PAGES SCANNED</span>
-      <span id="secPages" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--p30);">
-      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">SSL CERT</span>
-      <span style="text-align:right;"><span id="secSSL" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span> <span id="secSSLSub" style="font-size:9px;opacity:.5;"></span></span>
-    </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--p30);">
-      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">BROKEN LINKS</span>
-      <span id="secBroken" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--p30);">
-      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">HARMFUL CONTENT</span>
-      <span id="secHarmful" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--p30);">
-      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">CONTENT CHANGES</span>
-      <span id="secChanges" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;">
-      <span style="font-size:10px;opacity:.5;letter-spacing:1px;">NEXT SCAN</span>
-      <span id="secCountdown" style="font-size:14px;font-family:\'Courier New\',monospace;font-weight:bold;">—</span>
+    content='''<div style="width:min(100%,960px);margin:0 auto;padding:16px;box-sizing:border-box;">
+<div style="border:2px solid var(--p);border-radius:var(--r);padding:20px;margin-bottom:20px;background:var(--p10);">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+    <h2 style="margin:0;letter-spacing:4px;font-size:clamp(14px,3vw,20px);">&#128737; SECURITY HUB</h2>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <a href="/" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 14px;color:var(--p);background:var(--p10);font-family:'Courier New',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;" onmouseover="this.style.background='var(--p)';this.style.color='#000'" onmouseout="this.style.background='var(--p10)';this.style.color='var(--p)'">&#8962; HOME</a>
+      <span id="secTarget" style="font-size:10px;opacity:.5;"></span>
+      <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 18px;font-size:11px;">&#9654; SCAN NOW</button>
     </div>
   </div>
-
-  <!-- AI ANALYSIS -->
-  <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;margin-bottom:12px;">
+  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;">
+    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">PAGES SCANNED</div>
+      <div id="secPages" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secSSLCard">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">SSL CERT</div>
+      <div id="secSSL" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+      <div id="secSSLSub" style="font-size:9px;opacity:.5;margin-top:3px;"></div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secBrokenCard">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">BROKEN LINKS</div>
+      <div id="secBroken" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secHarmfulCard">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">HARMFUL CONTENT</div>
+      <div id="secHarmful" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+    </div>
+    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">CHANGES</div>
+      <div id="secChanges" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+    </div>
+  </div>
+  <div style="border:1px solid var(--p30);border-radius:8px;padding:14px;margin-bottom:14px;">
     <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9672; AI ANALYSIS</div>
-    <div id="secAI" style="font-size:11px;line-height:1.6;font-family:\'Courier New\',monospace;white-space:pre-wrap;overflow-x:auto;word-break:break-word;opacity:.85;">Awaiting scan data...</div>
+    <div id="secAI" style="font-size:12px;line-height:1.7;font-family:'Courier New',monospace;white-space:pre-wrap;opacity:.85;">Awaiting scan data...</div>
   </div>
-
-  <!-- DETAIL PANELS -->
-  <div style="display:grid;grid-template-columns:1fr;gap:8px;">
-    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9888; HARMFUL CONTENT</div>
-      <div id="secHarmfulList" style="font-size:11px;max-height:200px;overflow-y:auto;"></div>
-    </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
     <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128279; BROKEN LINKS</div>
       <div id="secBrokenList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
+    </div>
+    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
+      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9888; HARMFUL CONTENT</div>
+      <div id="secHarmfulList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
     </div>
     <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128196; CONTENT CHANGES</div>
@@ -1480,40 +1459,32 @@ def security_dashboard():
     </div>
     <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128200; SCAN HISTORY</div>
-      <div id="secHistoryBar" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+      <div id="secHistoryBar" style="display:flex;align-items:flex-end;gap:3px;height:60px;"></div>
     </div>
   </div>
-
-  <!-- FOOTER -->
-  <div style="margin-top:10px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">
-    LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; EVERY <span id="secInterval">—</span> MIN
-  </div>
+  <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; AUTO-SCAN EVERY <span id="secInterval">—</span> MIN</div>
 </div></div>
-
 <script>
-let _secInterval=120,_secNextScan=null,_secCountdownTimer=null,_secAllReports=[];
-
-function secStartCountdown(){
-  if(_secCountdownTimer) clearInterval(_secCountdownTimer);
-  _secCountdownTimer=setInterval(()=>{
-    if(!_secNextScan){document.getElementById('secCountdown').textContent='—';return;}
-    const diff=Math.max(0,Math.floor((new Date(_secNextScan+'Z').getTime()-Date.now())/1000));
-    const h=Math.floor(diff/3600),m=Math.floor((diff%3600)/60),s=diff%60;
-    const fmt=v=>String(v).padStart(2,'0');
-    document.getElementById('secCountdown').textContent=h>0?`${fmt(h)}:${fmt(m)}:${fmt(s)}`:`${fmt(m)}:${fmt(s)}`;
-  },1000);
-}
-
-function secRender(r,isLatest=true){
+async function secLoad(){
+  const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
+  if(s.ok){document.getElementById('secTarget').textContent=s.target||'';document.getElementById('secInterval').textContent=s.interval||'?';}
+  const d=await fetch('/api/security/reports').then(r=>r.json()).catch(()=>({}));
+  if(!d.ok||!d.reports.length){document.getElementById('secAI').textContent='No scans yet. Click SCAN NOW.';return;}
+  const r=d.reports[0];
+  // alert mode
   const crit=r.is_critical;
   const banner=document.getElementById('secAlertBanner');
-  if(crit&&isLatest){banner.style.display='block';document.body.style.setProperty('--p','#ff2222');document.body.style.setProperty('--bg','#0a0000');document.body.style.setProperty('--ac','#330000');}
-  else{banner.style.display='none';}
+  if(crit){
+    banner.style.display='block';
+    document.body.style.setProperty('--p','#ff2222');
+    document.body.style.setProperty('--bg','#0a0000');
+    document.body.style.setProperty('--ac','#330000');
+  }else{banner.style.display='none';}
   document.getElementById('secPages').textContent=r.pages_scanned??'—';
   const sslOk=r.ssl?.ok;const sslDays=r.ssl?.days_left??'?';
   document.getElementById('secSSL').textContent=sslOk?sslDays+'d':'⚠';
   document.getElementById('secSSL').style.color=sslOk?'var(--p)':'#ff3355';
-  document.getElementById('secSSLSub').textContent=sslOk?`${sslDays}d left`:'ISSUE';
+  document.getElementById('secSSLSub').textContent=sslOk?`expires in ${sslDays} days`:'CERTIFICATE ISSUE';
   const bl=r.broken_links?.length??0;
   document.getElementById('secBroken').textContent=bl;
   document.getElementById('secBroken').style.color=bl>0?'#ffaa00':'var(--p)';
@@ -1523,22 +1494,13 @@ function secRender(r,isLatest=true){
   const ch=r.content_changes?.length??0;
   document.getElementById('secChanges').textContent=ch;
   document.getElementById('secChanges').style.color=ch>0?'#ffaa00':'var(--p)';
-  function renderMd(md){
-    if(!md)return'No analysis.';
-    let h=md
-      .replace(/^### (.+)$/gm,'<div style="font-size:13px;letter-spacing:2px;opacity:.7;margin:12px 0 4px;border-bottom:1px solid var(--p30);padding-bottom:3px;">$1</div>')
-      .replace(/^## (.+)$/gm,'<div style="font-size:14px;letter-spacing:2px;margin:14px 0 5px;color:var(--p);text-shadow:0 0 8px var(--p);">$1</div>')
-      .replace(/^# (.+)$/gm,'<div style="font-size:16px;letter-spacing:3px;margin:16px 0 6px;color:var(--p);">$1</div>')
-      .replace(/\*\*(.+?)\*\*/g,'<b style="color:var(--p);">$1</b>')
-      .replace(/^\|(.+)\|$/gm,(line)=>{const cells=line.slice(1,-1).split('|').map(c=>c.trim());if(cells.every(c=>/^[-: ]+$/.test(c)))return'';return'<div style="display:flex;border-bottom:1px solid var(--p10);">'+cells.map(c=>`<div style="flex:1;padding:5px 8px;font-size:12px;word-break:break-word;">${c}</div>`).join('')+'</div>';})
-      .replace(/^- (.+)$/gm,'<div style="padding:2px 0 2px 14px;font-size:12px;">&#9658; $1</div>')
-      .replace(/\n\n/g,'<br>').replace(/\n/g,' ');
-    return h;
-  }
-  document.getElementById('secAI').innerHTML=renderMd(r.ai_analysis);
-  document.getElementById('secLastScan').textContent=r.timestamp?(isLatest?'':'\u25C4 ')+new Date(r.timestamp).toLocaleString():'—';
-  document.getElementById('secBrokenList').innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
-  document.getElementById('secHarmfulList').innerHTML=hm?r.harmful_content.map(h=>`
+  document.getElementById('secAI').textContent=r.ai_analysis||'No analysis.';
+  document.getElementById('secLastScan').textContent=r.timestamp?new Date(r.timestamp).toLocaleString():'—';
+  // lists
+  const bll=document.getElementById('secBrokenList');
+  bll.innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
+  const hml=document.getElementById('secHarmfulList');
+  hml.innerHTML=hm?r.harmful_content.map(h=>`
     <div style="padding:8px;margin-bottom:6px;border:1px solid #ff3355;border-radius:6px;background:#1a0005;">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;margin-bottom:4px;">
         <span style="color:#ff3355;font-size:11px;font-weight:bold;">⚠ ${h.source?.toUpperCase()||'PAGE'} — ${h.url}</span>
@@ -1548,43 +1510,16 @@ function secRender(r,isLatest=true){
       ${h.message?`<div style="font-size:11px;background:#0a0000;border-radius:4px;padding:5px 8px;margin-bottom:4px;word-break:break-word;opacity:.9;">"${h.message}"</div>`:''}
       <div style="font-size:9px;color:#ff3355;letter-spacing:1px;">KEYWORDS: ${h.keywords.join(', ')}</div>
     </div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
-  document.getElementById('secChangesList').innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
-}
-
-function secRenderHistory(activeIdx){
+  const chl=document.getElementById('secChangesList');
+  chl.innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
+  // history bar
   const bar=document.getElementById('secHistoryBar');bar.innerHTML='';
-  const shown=_secAllReports.slice(0,4);
-  shown.forEach((rpt,i)=>{
+  d.reports.slice(0,30).reverse().forEach(rpt=>{
     const issues=(rpt.broken_links?.length??0)+(rpt.harmful_content?.length??0)*3+(!rpt.ssl?.ok?5:0);
-    const hasHarmful=rpt.harmful_content?.length>0;
-    const col=hasHarmful?'#ff3355':issues>3?'#ffaa00':'var(--p)';
-    const active=i===activeIdx;
-    const dt=new Date(rpt.timestamp);
-    const label=dt.toLocaleDateString([],{month:'short',day:'numeric'})+' '+dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-    const statusIcon=hasHarmful?'⚠':issues>3?'~':'✓';
-    bar.innerHTML+=`<div onclick="secRender(_secAllReports[${i}],${i===0});secRenderHistory(${i});"
-      style="flex:1;min-width:0;padding:8px 6px;border:2px solid ${col};border-radius:8px;text-align:center;cursor:pointer;
-             background:${active?col+'33':'transparent'};transition:.15s;box-sizing:border-box;">
-      <div style="font-size:14px;">${statusIcon}</div>
-      <div style="font-size:8px;opacity:.7;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</div>
-      <div style="font-size:9px;color:${col};margin-top:2px;">${i===0?'LATEST':`SCAN ${i+1}`}</div>
-    </div>`;
+    const h=Math.max(4,Math.min(52,4+issues*3));
+    const col=rpt.harmful_content?.length>0?'#ff3355':issues>3?'#ffaa00':'var(--p)';
+    bar.innerHTML+=`<div title="${new Date(rpt.timestamp).toLocaleString()} — ${issues} issues" style="flex:1;min-width:6px;height:${h}px;background:${col};border-radius:2px 2px 0 0;align-self:flex-end;cursor:pointer;"></div>`;
   });
-}
-
-async function secLoad(){
-  const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
-  if(s.ok){
-    _secInterval=s.interval||120;
-    _secNextScan=s.next_scan||null;
-    document.getElementById('secInterval').textContent=s.interval||'?';
-    secStartCountdown();
-  }
-  const d=await fetch('/api/security/reports').then(r=>r.json()).catch(()=>({}));
-  if(!d.ok||!d.reports.length){document.getElementById('secAI').textContent='No scans yet. Click SCAN NOW.';return;}
-  _secAllReports=d.reports;
-  secRender(_secAllReports[0],true);
-  secRenderHistory(0);
 }
 async function secTriggerScan(){
   const btn=document.getElementById('secScanBtn');
