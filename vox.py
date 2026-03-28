@@ -1424,10 +1424,11 @@ def security_dashboard():
       <a href="/" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 14px;color:var(--p);background:var(--p10);font-family:'Courier New',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;" onmouseover="this.style.background='var(--p)';this.style.color='#000'" onmouseout="this.style.background='var(--p10)';this.style.color='var(--p)'">&#8962; HOME</a>
       <span id="secTarget" style="font-size:10px;opacity:.5;"></span>
       <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 18px;font-size:11px;">&#9654; SCAN NOW</button>
+      <button class="btn-action" id="secDismissBtn" onclick="secDismissAlert()" style="display:none;padding:7px 18px;font-size:11px;border-color:#ff3355;color:#ff3355;">&#10006; DISMISS ALERT</button>
     </div>
   </div>
   <style>@media(max-width:600px){#secHeaderBtns{width:100%;justify-content:flex-start;}}</style>
-  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px 14px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;position:relative;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;<button onclick="secDismissAlert()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.4);border:1px solid #fff;border-radius:4px;color:#fff;cursor:pointer;font-size:10px;padding:2px 8px;font-family:'Courier New',monospace;letter-spacing:1px;">&#10006; DISMISS</button></div>
+  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px 14px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;</div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;">
     <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">PAGES SCANNED</div>
@@ -1485,8 +1486,8 @@ async function secLoad(){
   const crit=r.is_critical;
   const banner=document.getElementById('secAlertBanner');
   if(crit){
-    if(!window._secAlertDismissed){banner.style.display='block';document.body.style.setProperty('--p','#ff2222');document.body.style.setProperty('--bg','#0a0000');document.body.style.setProperty('--ac','#330000');}
-  }else{if(!window._secAlertDismissed)banner.style.display='none';}
+    if(!window._secAlertDismissed){banner.style.display='block';document.body.style.setProperty('--p','#ff2222');document.body.style.setProperty('--bg','#0a0000');document.body.style.setProperty('--ac','#330000');document.getElementById('secDismissBtn').style.display='inline-flex';}
+  }else{if(!window._secAlertDismissed){banner.style.display='none';document.getElementById('secDismissBtn').style.display='none';}}
   document.getElementById('secPages').textContent=r.pages_scanned??'—';
   const sslOk=r.ssl?.ok;const sslDays=r.ssl?.days_left??'?';
   document.getElementById('secSSL').textContent=sslOk?sslDays+'d':'⚠';
@@ -1543,6 +1544,12 @@ function secDismissAlert(){
   window._secAlertDismissed=true;
   const banner=document.getElementById('secAlertBanner');
   if(banner)banner.style.display='none';
+  const btn=document.getElementById('secDismissBtn');
+  if(btn)btn.style.display='none';
+  // restore theme from CSS variable defaults
+  document.body.style.removeProperty('--p');
+  document.body.style.removeProperty('--bg');
+  document.body.style.removeProperty('--ac');
 }
 async function secTriggerScan(){
   const btn=document.getElementById('secScanBtn');
