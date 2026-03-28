@@ -1506,7 +1506,7 @@ async function secLoad(){
   document.getElementById('secLastScan').textContent=r.timestamp?new Date(r.timestamp).toLocaleString():'—';
   const intEl=document.getElementById('secInterval');if(intEl)intEl.textContent=s.interval||'?';
   if(s.last_scan&&s.interval){
-    window._secNextScanMs=new Date(s.last_scan).getTime()+s.interval*60000;
+    window._secNextScanMs=new Date(s.last_scan.endsWith('Z')?s.last_scan:s.last_scan+'Z').getTime()+s.interval*60000;
     if(!window._secCountdownTick){
       window._secCountdownTick=setInterval(()=>{
         const el=document.getElementById('secNextScan');if(!el)return;
