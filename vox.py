@@ -1149,7 +1149,7 @@ def handle_exception(e):
 # ══════════════════════════════════════════════════════════════════════════════
 _SEC_TARGET      = os.environ.get("TARGET_URL","")         # site to scan (set in Railway vars)
 _SEC_MAX_PAGES   = int(os.environ.get("SEC_MAX_PAGES","80"))
-_SEC_INTERVAL    = int(os.environ.get("SEC_INTERVAL_MINS","60"))
+_SEC_INTERVAL    = int(os.environ.get("SEC_INTERVAL_MINS","180"))
 _SEC_USERNAME    = os.environ.get("SEC_USERNAME","")       # admin username for scanner login
 _SEC_PASSWORD_ENC= os.environ.get("SEC_PASSWORD_ENC","")  # Fernet-encrypted password for scanner
 _SEC_STATE_FILE  = str(_BASE/"sec_state.json")
@@ -1427,7 +1427,7 @@ def security_dashboard():
     </div>
   </div>
   <style>@media(max-width:600px){#secHeaderBtns{width:100%;justify-content:flex-start;}}</style>
-  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px 14px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;position:relative;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;<button onclick="document.getElementById('secAlertBanner').style.display='none'" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.4);border:1px solid #fff;border-radius:4px;color:#fff;cursor:pointer;font-size:10px;padding:2px 8px;font-family:'Courier New',monospace;letter-spacing:1px;">&#10006; DISMISS</button></div>
+  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px 14px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;position:relative;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;<button onclick="secDismissAlert()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.4);border:1px solid #fff;border-radius:4px;color:#fff;cursor:pointer;font-size:10px;padding:2px 8px;font-family:'Courier New',monospace;letter-spacing:1px;">&#10006; DISMISS</button></div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;">
     <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">PAGES SCANNED</div>
@@ -1473,24 +1473,10 @@ def security_dashboard():
       <div id="secHistoryBar" style="display:flex;align-items:flex-end;gap:3px;height:60px;"></div>
     </div>
   </div>
-  <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; AUTO-SCAN EVERY <span id="secInterval">—</span> MIN</div>
-</div></div>
-<script>
-async function secLoad(){
-  const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
-  if(s.ok){document.getElementById('secTarget').textContent=s.target||'';document.getElementById('secInterval').textContent=s.interval||'?';}
-  const d=await fetch('/api/security/reports').then(r=>r.json()).catch(()=>({}));
-  if(!d.ok||!d.reports.length){document.getElementById('secAI').textContent='No scans yet. Click SCAN NOW.';return;}
-  const r=d.reports[0];
-  // alert mode
-  const crit=r.is_critical;
-  const banner=document.getElementById('secAlertBanner');
-  if(crit){
-    banner.style.display='block';
-    document.body.style.setProperty('--p','#ff2222');
-    document.body.style.setProperty('--bg','#0a0000');
-    document.body.style.setProperty('--ac','#330000');
-  }else{banner.style.display='none';}
+  <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; NEXT SCAN: <span id="secNextScan">—</span> &nbsp;|&nbsp; INTERVAL: <span id="secInterval">—</span> MIN</div>
+';
+    if(!window._secAlertDismissed){banner.style.display='block';document.body.style.setProperty('--p','#ff2222');document.body.style.setProperty('--bg','#0a0000');document.body.style.setProperty('--ac','#330000');}
+  }else{if(!window._secAlertDismissed)banner.style.display='none';}
   document.getElementById('secPages').textContent=r.pages_scanned??'—';
   const sslOk=r.ssl?.ok;const sslDays=r.ssl?.days_left??'?';
   document.getElementById('secSSL').textContent=sslOk?sslDays+'d':'⚠';
@@ -1507,6 +1493,19 @@ async function secLoad(){
   document.getElementById('secChanges').style.color=ch>0?'#ffaa00':'var(--p)';
   document.getElementById('secAI').textContent=r.ai_analysis||'No analysis.';
   document.getElementById('secLastScan').textContent=r.timestamp?new Date(r.timestamp).toLocaleString():'—';
+  const intEl=document.getElementById('secInterval');if(intEl)intEl.textContent=s.interval||'?';
+  if(s.last_scan&&s.interval){
+    window._secNextScanMs=new Date(s.last_scan).getTime()+s.interval*60000;
+    if(!window._secCountdownTick){
+      window._secCountdownTick=setInterval(()=>{
+        const el=document.getElementById('secNextScan');if(!el)return;
+        const diff=Math.max(0,window._secNextScanMs-Date.now());
+        if(diff===0){el.textContent='SCANNING SOON...';return;}
+        const hh=Math.floor(diff/3600000),mm=Math.floor((diff%3600000)/60000),ss=Math.floor((diff%60000)/1000);
+        el.textContent=(hh?hh+'h ':'')+mm+'m '+ss+'s';
+      },1000);
+    }
+  }
   // lists
   const bll=document.getElementById('secBrokenList');
   bll.innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
@@ -1531,6 +1530,11 @@ async function secLoad(){
     const col=rpt.harmful_content?.length>0?'#ff3355':issues>3?'#ffaa00':'var(--p)';
     bar.innerHTML+=`<div title="${new Date(rpt.timestamp).toLocaleString()} — ${issues} issues" style="flex:1;min-width:6px;height:${h}px;background:${col};border-radius:2px 2px 0 0;align-self:flex-end;cursor:pointer;"></div>`;
   });
+}
+function secDismissAlert(){
+  window._secAlertDismissed=true;
+  const banner=document.getElementById('secAlertBanner');
+  if(banner)banner.style.display='none';
 }
 async function secTriggerScan(){
   const btn=document.getElementById('secScanBtn');
