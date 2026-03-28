@@ -1543,6 +1543,8 @@ async function secLoad(){
     </div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const chl=document.getElementById('secChangesList');
   chl.innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
+  const pgl=document.getElementById('secPagesList');
+  if(pgl){const pl=r.pages_list||[];pgl.innerHTML=pl.length?pl.map((p,i)=>`<div style="padding:3px 0;border-bottom:1px solid var(--p10);word-break:break-all;opacity:.8;"><span style="color:var(--p);margin-right:6px;">${i+1}.</span>${p}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">No data</div>';}
   const bar=document.getElementById('secHistoryBar');bar.innerHTML='';
   d.reports.slice(0,30).reverse().forEach(rpt=>{
     const issues=(rpt.broken_links?.length??0)+(rpt.harmful_content?.length??0)*3+(!rpt.ssl?.ok?5:0);
