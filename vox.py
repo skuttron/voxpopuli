@@ -229,10 +229,10 @@ def theme_css(t):
         ".hero-btn{font-size:16px;padding:13px 20px;letter-spacing:1px;border-radius:10px;border-width:3px}.menu-trigger{font-size:15px;padding:12px 18px;border-width:3px}",
         ".traffic-counter{top:6px;right:6px;padding:5px 12px;font-size:12px;line-height:1.6;display:flex;flex-direction:row;gap:10px;align-items:center}.tc-row{gap:6px}.tc-label{font-size:11px}.tc-val{font-size:13px}",
         ".tile-grid{display:grid!important;grid-template-columns:repeat(4,1fr)!important;gap:10px!important;padding:0 6px!important;box-sizing:border-box;margin:10px 0;width:100%}",
-        ".tile{padding:22px 4px;border-radius:14px;width:100%;flex:none;min-width:0;max-width:none;border-width:3px;box-shadow:0 0 20px var(--p30)}.tile i{font-size:30px;margin-bottom:10px}.tile div{font-size:12px;letter-spacing:0;line-height:1.3}",
-        ".search-box{width:100%;margin:0 0 16px;box-sizing:border-box;padding:0 4px}.search-input{font-size:16px;padding:14px 18px}.search-btn{font-size:16px;padding:14px 18px}",
-        ".content-box{width:100%;padding:20px 18px;font-size:17px;line-height:1.8;margin:14px 0;box-sizing:border-box;border-width:3px}",
-        ".three-column-grid{grid-template-columns:1fr;gap:14px;padding:4px;margin-bottom:16px}.column{padding:22px 18px;border-width:3px}.column h3{font-size:18px}.column p{font-size:16px}.btn-action{font-size:16px;padding:14px 22px;margin-top:14px;border-width:2px}",
+        ".tile{padding:22px 4px!important;border-radius:14px!important;width:100%!important;flex:none!important;min-width:0!important;max-width:none!important;border-width:3px!important;box-shadow:0 0 20px var(--p30)!important}.tile i{font-size:30px!important;margin-bottom:10px!important}.tile div{font-size:12px!important;letter-spacing:0!important;line-height:1.3!important}",
+        ".search-box{width:100%!important;margin:0 0 16px!important;box-sizing:border-box!important;padding:0 4px!important}.search-input{font-size:16px!important;padding:14px 18px!important}.search-btn{font-size:16px!important;padding:14px 18px!important}",
+        ".content-box{width:100%!important;padding:20px 18px!important;font-size:17px!important;line-height:1.8!important;margin:14px 0!important;box-sizing:border-box!important;border-width:3px!important}",
+        ".three-column-grid{grid-template-columns:1fr!important;gap:14px!important;padding:4px!important;margin-bottom:16px!important}.column{padding:22px 18px!important;border-width:3px!important}.column h3{font-size:18px!important}.column p{font-size:16px!important}.btn-action{font-size:16px!important;padding:14px 22px!important;margin-top:14px!important;border-width:2px!important}",
         ".modal-overlay{padding:12px;align-items:center}.modal-box{max-width:99%;width:100%;border-radius:var(--r);padding:24px 20px;margin:auto;max-height:93vh;overflow-y:auto}",
         ".modal-box h2{font-size:18px;letter-spacing:3px;margin-bottom:14px}.field-plain{font-size:16px;padding:14px 14px}.field{font-size:16px;padding:14px 44px 14px 14px}.theme-grid{gap:8px}.theme-btn{font-size:13px;padding:10px 4px}",
         ".dropdown-menu{min-width:220px;left:auto;right:0;z-index:9999}.dropdown-item{padding:16px 18px;font-size:16px}",
@@ -430,7 +430,7 @@ if($('dmConvList')){{['tabContentDM','tabContentGroup','tabContentPrivate','tabC
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#00ff00">
@@ -438,7 +438,9 @@ if($('dmConvList')){{['tabContentDM','tabContentGroup','tabContentPrivate','tabC
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="VOX">
 <link rel="apple-touch-icon" href="/icon-192.png">
-<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
+<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');
+// Force reload if cached version is stale
+if('caches' in window){caches.keys().then(keys=>keys.forEach(k=>caches.delete(k)));}</script>
 <style>{theme_css(theme)}</style>
 </head><body>
 <div class="crt-overlay"></div><div class="scanline-a"></div><div class="scanline-b"></div><div class="scanline-c"></div>
