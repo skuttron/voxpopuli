@@ -1474,7 +1474,17 @@ def security_dashboard():
     </div>
   </div>
   <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; NEXT SCAN: <span id="secNextScan">—</span> &nbsp;|&nbsp; INTERVAL: <span id="secInterval">—</span> MIN</div>
-';
+</div></div>
+<script>
+async function secLoad(){
+  const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
+  if(s.ok){document.getElementById('secTarget').textContent=s.target||'';}
+  const d=await fetch('/api/security/reports').then(r=>r.json()).catch(()=>({}));
+  if(!d.ok||!d.reports.length){document.getElementById('secAI').textContent='No scans yet. Click SCAN NOW.';return;}
+  const r=d.reports[0];
+  const crit=r.is_critical;
+  const banner=document.getElementById('secAlertBanner');
+  if(crit){
     if(!window._secAlertDismissed){banner.style.display='block';document.body.style.setProperty('--p','#ff2222');document.body.style.setProperty('--bg','#0a0000');document.body.style.setProperty('--ac','#330000');}
   }else{if(!window._secAlertDismissed)banner.style.display='none';}
   document.getElementById('secPages').textContent=r.pages_scanned??'—';
@@ -1506,7 +1516,6 @@ def security_dashboard():
       },1000);
     }
   }
-  // lists
   const bll=document.getElementById('secBrokenList');
   bll.innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const hml=document.getElementById('secHarmfulList');
@@ -1522,7 +1531,6 @@ def security_dashboard():
     </div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const chl=document.getElementById('secChangesList');
   chl.innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
-  // history bar
   const bar=document.getElementById('secHistoryBar');bar.innerHTML='';
   d.reports.slice(0,30).reverse().forEach(rpt=>{
     const issues=(rpt.broken_links?.length??0)+(rpt.harmful_content?.length??0)*3+(!rpt.ssl?.ok?5:0);
