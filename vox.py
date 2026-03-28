@@ -25,7 +25,7 @@ def get_database_url():
     if "sslmode" not in url: url+=("&" if "?" in url else "?")+"sslmode=require"
     return url
 DATABASE_URL=get_database_url()
-ADMIN_USER="Eagleone"
+ADMIN_USER="Eagle1"
 _KEY_FILE=str(_BASE/"secret.key")
 if not os.path.exists(_KEY_FILE): open(_KEY_FILE,"wb").write(Fernet.generate_key())
 fernet=Fernet(open(_KEY_FILE,"rb").read())
