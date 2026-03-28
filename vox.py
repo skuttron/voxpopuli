@@ -1420,11 +1420,11 @@ def security_dashboard():
 
   <!-- HEADER -->
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
-    <div style="display:flex;align-items:center;gap:10px;">
-      <a href="/" style="display:inline-flex;align-items:center;gap:4px;border:2px solid var(--p);border-radius:8px;padding:5px 12px;color:var(--p);background:var(--p10);font-family:\'Courier New\',monospace;font-size:11px;font-weight:bold;text-decoration:none;" onmouseover="this.style.background=\'var(--p)\';this.style.color=\'#000\'" onmouseout="this.style.background=\'var(--p10)\';this.style.color=\'var(--p)\'">&#8962; HOME</a>
-      <h2 style="margin:0;letter-spacing:3px;font-size:clamp(13px,2.5vw,18px);">&#128737; SECURITY HUB</h2>
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1;">
+      <a href="/" style="display:inline-flex;align-items:center;gap:4px;border:2px solid var(--p);border-radius:8px;padding:5px 12px;color:var(--p);background:var(--p10);font-family:\'Courier New\',monospace;font-size:11px;font-weight:bold;text-decoration:none;white-space:nowrap;" onmouseover="this.style.background=\'var(--p)\';this.style.color=\'#000\'" onmouseout="this.style.background=\'var(--p10)\';this.style.color=\'var(--p)\'">&#8962; HOME</a>
+      <h2 style="margin:0;letter-spacing:3px;font-size:clamp(13px,2.5vw,18px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">&#128737; SECURITY HUB</h2>
     </div>
-    <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 16px;font-size:11px;white-space:nowrap;flex-shrink:0;">&#9654; SCAN NOW</button>
+    <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 16px;font-size:11px;white-space:nowrap;flex-shrink:0;margin:0;">&#9654; SCAN NOW</button>
   </div>
 
   <!-- ALERT BANNER -->
