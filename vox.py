@@ -1106,7 +1106,7 @@ def api_ask():
     if not api_key: return ok(answer="")
     try:
         payload=_json.dumps({"contents":[{"parts":[{"text":"Answer concisely under 150 words. Plain text only, no markdown.\n\n"+query}]}],"generationConfig":{"maxOutputTokens":300,"temperature":0.7}}).encode()
-        req=urllib.request.Request(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",data=payload,headers={"Content-Type":"application/json"})
+        req=urllib.request.Request(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={api_key}",data=payload,headers={"Content-Type":"application/json"})
         with urllib.request.urlopen(req,timeout=15) as resp: data=_json.loads(resp.read().decode())
         return ok(answer=data["candidates"][0]["content"]["parts"][0]["text"].strip())
     except Exception: return ok(answer="")
@@ -1322,7 +1322,7 @@ def _sec_ai_analysis(report, ai_only=None):
             payload=_json.dumps({"contents":[{"parts":[{"text":prompt}]}],
                 "generationConfig":{"maxOutputTokens":800,"temperature":0.4}}).encode()
             req=urllib.request.Request(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={gemini_key}",
                 data=payload,headers={"Content-Type":"application/json"})
             with urllib.request.urlopen(req,timeout=20) as resp:
                 gdata=_json.loads(resp.read().decode())
