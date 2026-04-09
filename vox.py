@@ -1153,6 +1153,7 @@ except ImportError:
     _requests_lib=None
 _SEC_MAX_PAGES   = int(os.environ.get("SEC_MAX_PAGES","80"))
 _SEC_INTERVAL    = int(os.environ.get("SEC_INTERVAL_MINS","180"))
+_SEC_TARGET      = os.environ.get("TARGET_URL","")         # target site URL for security scanner
 _SEC_USERNAME    = os.environ.get("SEC_USERNAME","")       # admin username for scanner login
 _SEC_PASSWORD_ENC= os.environ.get("SEC_PASSWORD_ENC","")  # Fernet-encrypted password for scanner
 _SEC_STATE_FILE  = str(_BASE/"sec_state.json")
@@ -1689,15 +1690,14 @@ async function secTriggerScan(ai){
     const j=await res.json();
     if(!j.ok){
       if(secAI)secAI.textContent='⚠ SCAN ERROR: '+j.error;
-      btns.forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=false;});
-      document.getElementById('secScanBtn').textContent='▶ SCAN NOW';
-      document.getElementById('secScanClaude').textContent='▶ CLAUDE';
-      document.getElementById('secScanGemini').textContent='▶ GEMINI';
+      const _labels={'secScanBtn':'▶ SCAN NOW','secScanClaude':'▶ CLAUDE','secScanGemini':'▶ GEMINI'};
+      btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=_labels[id];}});
       return;
     }
   }catch(e){
     if(secAI)secAI.textContent='⚠ NETWORK ERROR: '+e.message;
-    btns.forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=false;});
+    const _labels={'secScanBtn':'▶ SCAN NOW','secScanClaude':'▶ CLAUDE','secScanGemini':'▶ GEMINI'};
+    btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=_labels[id];}});
     return;
   }
   // small delay to let the lock acquire before first poll
@@ -1710,10 +1710,8 @@ async function secTriggerScan(ai){
     if(s.last_error&&secAI)secAI.textContent='⚠ SCAN ERROR: '+s.last_error;
     if(!s.scanning||pollCount>120){
       clearInterval(poll);secLoad();
-      btns.forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=false;});
-      document.getElementById('secScanBtn').textContent='▶ SCAN NOW';
-      document.getElementById('secScanClaude').textContent='▶ CLAUDE';
-      document.getElementById('secScanGemini').textContent='▶ GEMINI';
+      const _labels={'secScanBtn':'▶ SCAN NOW','secScanClaude':'▶ CLAUDE','secScanGemini':'▶ GEMINI'};
+      btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=_labels[id];}});
     }
   },3000);
 }
