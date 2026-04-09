@@ -1438,6 +1438,46 @@ def api_sec_debug():
         "reports_file_exists": os.path.exists(_SEC_REPORTS_FILE),
     })
 
+@app.route("/api/security/test-scan")
+def api_sec_test_scan():
+    if not is_admin(): return err("FORBIDDEN")
+    results = {}
+    # Test 1: TARGET set?
+    results["target"] = _SEC_TARGET or "NOT SET"
+    results["target_ok"] = bool(_SEC_TARGET)
+    if not _SEC_TARGET:
+        return jsonify({"ok": False, "step": "target", "results": results})
+    # Test 2: Can we create a session?
+    try:
+        sess = _sec_get_session()
+        results["session"] = "OK"
+    except Exception as e:
+        results["session"] = str(e)
+        return jsonify({"ok": False, "step": "session", "results": results})
+    # Test 3: Can we hit the target URL?
+    try:
+        r = sess.get(_SEC_TARGET, timeout=8)
+        results["fetch"] = f"HTTP {r.status_code}"
+        results["fetch_ok"] = r.status_code < 400
+    except Exception as e:
+        results["fetch"] = str(e)
+        return jsonify({"ok": False, "step": "fetch", "results": results})
+    # Test 4: SSL check
+    try:
+        hostname = urllib.parse.urlparse(_SEC_TARGET).netloc
+        ssl_r = _sec_check_ssl(hostname)
+        results["ssl"] = ssl_r
+    except Exception as e:
+        results["ssl"] = str(e)
+    # Test 5: Try a mini crawl (1 page only)
+    try:
+        pages, _ = _sec_crawl(_SEC_TARGET, max_pages=1)
+        results["crawl"] = f"OK, got {len(pages)} page(s)"
+    except Exception as e:
+        results["crawl"] = str(e)
+        return jsonify({"ok": False, "step": "crawl", "results": results})
+    return jsonify({"ok": True, "results": results})
+
 @app.route("/api/security/scan",methods=["POST"])
 def api_sec_scan():
     if e:=require_admin(): return e
@@ -1517,6 +1557,7 @@ def security_dashboard():
         <button class="sec-scan-btn" id="secScanGemini" onclick="secTriggerScan('gemini')" style="border-color:#4488ff;color:#4488ff;background:color-mix(in srgb,#4488ff 8%,transparent);">▶ GEMINI</button>
         <button class="sec-scan-btn" id="secDismissBtn" onclick="secDismissAlert()" style="display:none;border-color:#ff3355;color:#ff3355;background:color-mix(in srgb,#ff3355 8%,transparent);">✖ DISMISS</button>
         <button class="sec-scan-btn" onclick="secDebug()" style="border-color:#888;color:#888;background:color-mix(in srgb,#888 8%,transparent);font-size:10px;">⚙ DEBUG</button>
+        <button class="sec-scan-btn" onclick="secTestScan()" style="border-color:#0ff;color:#0ff;background:color-mix(in srgb,#0ff 8%,transparent);font-size:10px;">⚙ TEST SCAN</button>
       </div>
     </div>
   </div>
@@ -1756,6 +1797,18 @@ async function secTriggerScan(ai){
       btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=_labels[id];}});
     }
   },3000);
+}
+async function secTestScan(){
+  const secAI=document.getElementById('secAI');
+  if(secAI)secAI.textContent='⟳ Running test scan...';
+  try{
+    const r=await fetch('/api/security/test-scan').then(r=>r.json());
+    const msg=JSON.stringify(r,null,2);
+    if(secAI)secAI.textContent=msg;
+    alert('TEST SCAN RESULT:\n\n'+msg);
+  }catch(e){
+    alert('Test scan fetch failed: '+e.message);
+  }
 }
 async function secDebug(){
   const secAI=document.getElementById('secAI');
