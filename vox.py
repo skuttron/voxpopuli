@@ -1147,10 +1147,6 @@ def handle_exception(e):
 # ══════════════════════════════════════════════════════════════════════════════
 # SECURITY HUB — integrated scanner
 # ══════════════════════════════════════════════════════════════════════════════
-try:
-    import requests as _requests_lib
-except ImportError:
-    _requests_lib=None
 _SEC_MAX_PAGES   = int(os.environ.get("SEC_MAX_PAGES","80"))
 _SEC_INTERVAL    = int(os.environ.get("SEC_INTERVAL_MINS","180"))
 _SEC_TARGET      = os.environ.get("TARGET_URL","")         # target site URL for security scanner
@@ -1175,11 +1171,38 @@ def _sec_load_state():
 def _sec_save_state(s):
     with open(_SEC_STATE_FILE,"w") as f: _json.dump(s,f)
 
+import http.cookiejar as _cookiejar
+
+class _SecSession:
+    """Minimal requests-like session using only stdlib urllib."""
+    def __init__(self):
+        self.headers={"User-Agent":"VoxSecBot/1.0"}
+        self._cj=_cookiejar.CookieJar()
+        self._opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self._cj))
+    def _req(self,url,data=None,method=None,timeout=8):
+        req=urllib.request.Request(url,data=data,headers=self.headers,method=method)
+        try:
+            with self._opener.open(req,timeout=timeout) as resp:
+                return type('R',(object,),{
+                    'status_code':resp.status,
+                    'text':resp.read().decode('utf-8','replace'),
+                    'url':resp.url if hasattr(resp,'url') else url,
+                })()
+        except urllib.error.HTTPError as e:
+            return type('R',(object,),{'status_code':e.code,'text':'','url':url})()
+        except Exception:
+            return type('R',(object,),{'status_code':0,'text':'','url':url})()
+    def get(self,url,timeout=8,allow_redirects=True):  return self._req(url,timeout=timeout)
+    def head(self,url,timeout=6,allow_redirects=True): return self._req(url,method='HEAD',timeout=timeout)
+    def post(self,url,json=None,timeout=10):
+        data=_json.dumps(json).encode() if json else None
+        req=urllib.request.Request(url,data=data,headers={**self.headers,'Content-Type':'application/json'},method='POST')
+        try:
+            with self._opener.open(req,timeout=timeout): pass
+        except Exception: pass
+
 def _sec_get_session():
-    if _requests_lib is None:
-        raise RuntimeError("requests library not installed — run: pip install requests")
-    s=_requests_lib.Session()
-    s.headers.update({"User-Agent":"VoxSecBot/1.0"})
+    s=_SecSession()
     if not _SEC_TARGET or not _SEC_USERNAME or not _SEC_PASSWORD_ENC:
         return s
     try:
@@ -1190,17 +1213,11 @@ def _sec_get_session():
         app.logger.warning(f"SecBot login failed: {e}")
     return s
 
-_SEC_KNOWN_ROUTES=[
-    "/",
-    "/api/traffic/public",
-    "/api/groups",
-    "/api/posts",
-]
+_SEC_KNOWN_ROUTES=["/","/api/traffic/public","/api/groups","/api/posts"]
 
 def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
     sess=_sec_get_session()
     base=base_url.rstrip("/")
-    # seed with known routes so JS-rendered pages are always covered
     seed=[base+r for r in _SEC_KNOWN_ROUTES]
     visited,queue=[],seed;seen=set()
     domain=urllib.parse.urlparse(base_url).netloc
@@ -1211,7 +1228,7 @@ def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
         seen.add(url)
         if any(s in url for s in _skip): seen.add(url);visited.append(url);continue
         try:
-            r=sess.get(url,timeout=8,allow_redirects=True)
+            r=sess.get(url,timeout=8)
             visited.append(url)
             soup=BeautifulSoup(r.text,"html.parser")
             for a in soup.find_all("a",href=True):
@@ -1237,7 +1254,7 @@ def _sec_broken_links(pages,sess):
     broken=[]
     for url in pages:
         try:
-            r=sess.head(url,timeout=6,allow_redirects=True)
+            r=sess.head(url,timeout=6)
             if r.status_code>=400: broken.append({"url":url,"status":r.status_code})
         except Exception as e: broken.append({"url":url,"status":"error","detail":str(e)})
     return broken
@@ -1415,7 +1432,7 @@ def api_sec_debug():
         "_SEC_TARGET_bool": bool(_SEC_TARGET),
         "lock_locked": _SEC_LOCK.locked(),
         "last_error": _SEC_LAST_ERROR.get("msg"),
-        "requests_lib": str(_requests_lib),
+        "requests_lib": "stdlib urllib (built-in)",
         "anthropic_client": str(_anthropic_client),
         "python_version": sys.version,
         "reports_file_exists": os.path.exists(_SEC_REPORTS_FILE),
@@ -1500,7 +1517,6 @@ def security_dashboard():
         <button class="sec-scan-btn" id="secScanGemini" onclick="secTriggerScan('gemini')" style="border-color:#4488ff;color:#4488ff;background:color-mix(in srgb,#4488ff 8%,transparent);">▶ GEMINI</button>
         <button class="sec-scan-btn" id="secDismissBtn" onclick="secDismissAlert()" style="display:none;border-color:#ff3355;color:#ff3355;background:color-mix(in srgb,#ff3355 8%,transparent);">✖ DISMISS</button>
         <button class="sec-scan-btn" onclick="secDebug()" style="border-color:#888;color:#888;background:color-mix(in srgb,#888 8%,transparent);font-size:10px;">⚙ DEBUG</button>
-        <button class="sec-scan-btn" onclick="alert('CLICK WORKS - JS OK')" style="border-color:#0f0;color:#0f0;background:color-mix(in srgb,#0f0 8%,transparent);font-size:10px;">✓ TEST</button>
       </div>
     </div>
   </div>
@@ -1756,7 +1772,7 @@ async function secDebug(){
 }
 secLoad();setInterval(secLoad,30000);
 </script>'''
-    return (
+    resp = app.make_response(
         '<!DOCTYPE html><html lang="en"><head>'
         '<meta charset="UTF-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">'
@@ -1767,5 +1783,9 @@ secLoad();setInterval(secLoad,30000);
         + content +
         '</body></html>'
     )
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 if __name__=="__main__": app.run(debug=False)
