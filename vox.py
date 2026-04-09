@@ -1461,9 +1461,10 @@ def security_dashboard():
   </div>
   <div style="border:1px solid var(--p30);border-radius:8px;padding:14px;margin-bottom:14px;">
     <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9672; AI ANALYSIS</div>
-    <div id="secAI" style="font-size:12px;line-height:1.7;font-family:'Courier New',monospace;white-space:pre-wrap;opacity:.85;">Awaiting scan data...</div>
+    <div id="secAI" style="font-size:12px;line-height:1.7;font-family:'Courier New',monospace;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;opacity:.85;">Awaiting scan data...</div>
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+  <style>@media(max-width:600px){#secDetailGrid{grid-template-columns:1fr!important;}#secDetailGrid [style*="grid-column:span 2"]{grid-column:span 1!important;}}</style>
+  <div id="secDetailGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
     <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128279; BROKEN LINKS</div>
       <div id="secBrokenList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
@@ -1485,7 +1486,7 @@ def security_dashboard():
       <div id="secPagesList" style="font-size:10px;max-height:160px;overflow-y:auto;"></div>
     </div>
   </div>
-  <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; NEXT SCAN: <span id="secNextScan">—</span> &nbsp;|&nbsp; INTERVAL: <span id="secInterval">—</span> MIN</div>
+  <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;word-break:break-word;overflow-wrap:anywhere;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; NEXT SCAN: <span id="secNextScan">—</span> &nbsp;|&nbsp; INTERVAL: <span id="secInterval">—</span> MIN</div>
 </div></div>
 <script>
 async function secLoad(){
