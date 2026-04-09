@@ -1477,14 +1477,11 @@ def security_dashboard():
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128196; CONTENT CHANGES</div>
       <div id="secChangesList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
     </div>
-    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128200; SCAN HISTORY</div>
-      <div id="secHistoryBar" style="display:flex;align-items:flex-end;gap:3px;height:60px;"></div>
-    </div>
-    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;grid-column:span 2;">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128269; PAGES SCANNED</div>
-      <div id="secPagesList" style="font-size:10px;max-height:160px;overflow-y:auto;"></div>
-    </div>
+  </div>
+  <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;margin-top:12px;">
+    <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:10px;">&#128200; SCAN HISTORY</div>
+    <div id="secHistoryTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
+    <div id="secHistoryDetail" style="font-size:11px;min-height:60px;"></div>
   </div>
   <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;word-break:break-word;overflow-wrap:anywhere;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; NEXT SCAN: <span id="secNextScan">—</span> &nbsp;|&nbsp; INTERVAL: <span id="secInterval">—</span> MIN</div>
 </div></div>
@@ -1546,13 +1543,51 @@ async function secLoad(){
   chl.innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
   const pgl=document.getElementById('secPagesList');
   if(pgl){const pl=r.pages_list||[];pgl.innerHTML=pl.length?pl.map((p,i)=>`<div style="padding:3px 0;border-bottom:1px solid var(--p10);word-break:break-all;opacity:.8;"><span style="color:var(--p);margin-right:6px;">${i+1}.</span>${p}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">No data</div>';}
-  const bar=document.getElementById('secHistoryBar');bar.innerHTML='';
-  d.reports.slice(0,30).reverse().forEach(rpt=>{
+  window._secReports=d.reports;
+  secBuildHistoryTabs(d.reports,0);
+}
+function secBuildHistoryTabs(reports,activeIdx){
+  const tabs=document.getElementById('secHistoryTabs');
+  const detail=document.getElementById('secHistoryDetail');
+  if(!tabs||!detail)return;
+  tabs.innerHTML=reports.slice(0,20).map((rpt,i)=>{
     const issues=(rpt.broken_links?.length??0)+(rpt.harmful_content?.length??0)*3+(!rpt.ssl?.ok?5:0);
-    const h=Math.max(4,Math.min(52,4+issues*3));
     const col=rpt.harmful_content?.length>0?'#ff3355':issues>3?'#ffaa00':'var(--p)';
-    bar.innerHTML+=`<div title="${new Date(rpt.timestamp).toLocaleString()} — ${issues} issues" style="flex:1;min-width:6px;height:${h}px;background:${col};border-radius:2px 2px 0 0;align-self:flex-end;cursor:pointer;"></div>`;
-  });
+    const dt=new Date(rpt.timestamp);
+    const label=dt.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+dt.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+    const isActive=i===activeIdx;
+    return `<button onclick="secBuildHistoryTabs(window._secReports,${i})" style="font-family:'Courier New',monospace;font-size:9px;letter-spacing:1px;padding:5px 9px;border-radius:6px;cursor:pointer;border:1px solid ${col};color:${isActive?'#000':col};background:${isActive?col:'transparent'};transition:all .15s;">${i===0?'LATEST':label}</button>`;
+  }).join('');
+  const rpt=reports[activeIdx];
+  if(!rpt){detail.innerHTML='<div style="opacity:.4;">No data</div>';return;}
+  const dt=new Date(rpt.timestamp);
+  const bl=rpt.broken_links?.length??0;
+  const hm=rpt.harmful_content?.length??0;
+  const ch=rpt.content_changes?.length??0;
+  const sslOk=rpt.ssl?.ok;const sslDays=rpt.ssl?.days_left??'?';
+  const pl=rpt.pages_list||[];
+  detail.innerHTML=`
+    <div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:8px;">${dt.toLocaleString()} &nbsp;·&nbsp; ${rpt.pages_scanned??'?'} pages &nbsp;·&nbsp; SSL: ${sslOk?sslDays+'d ✓':'⚠ ISSUE'}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div style="border:1px solid var(--p20);border-radius:6px;padding:8px;">
+        <div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">&#128279; BROKEN LINKS</div>
+        ${bl?rpt.broken_links.map(b=>`<div style="padding:3px 0;word-break:break-all;font-size:10px;border-bottom:1px solid var(--p10);"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None</div>'}
+      </div>
+      <div style="border:1px solid var(--p20);border-radius:6px;padding:8px;">
+        <div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">&#9888; HARMFUL</div>
+        ${hm?rpt.harmful_content.map(h=>`<div style="padding:3px 0;word-break:break-all;font-size:10px;border-bottom:1px solid var(--p10);color:#ff3355;">${h.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None</div>'}
+      </div>
+      <div style="border:1px solid var(--p20);border-radius:6px;padding:8px;">
+        <div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">&#128196; CHANGES</div>
+        ${ch?rpt.content_changes.map(c=>`<div style="padding:3px 0;word-break:break-all;font-size:10px;border-bottom:1px solid var(--p10);"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None</div>'}
+      </div>
+      <div style="border:1px solid var(--p20);border-radius:6px;padding:8px;">
+        <div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">&#128269; PAGES</div>
+        ${pl.length?pl.map((p,i)=>`<div style="padding:3px 0;word-break:break-all;font-size:10px;border-bottom:1px solid var(--p10);opacity:.8;"><span style="color:var(--p);margin-right:4px;">${i+1}.</span>${p}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">No data</div>'}
+      </div>
+    </div>
+    ${rpt.ai_analysis?`<div style="border:1px solid var(--p20);border-radius:6px;padding:8px;"><div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">&#9672; AI ANALYSIS</div><div style="font-size:11px;line-height:1.6;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;opacity:.85;">${rpt.ai_analysis}</div></div>`:''}
+  `;
 }
 function secDismissAlert(){
   window._secAlertDismissed=true;
