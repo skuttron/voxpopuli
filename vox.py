@@ -1700,15 +1700,19 @@ async function secTriggerScan(ai){
     btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=_labels[id];}});
     return;
   }
-  // small delay to let the lock acquire before first poll
-  await new Promise(r=>setTimeout(r,1500));
+  if(secAI)secAI.textContent='⟳ Scan started, waiting for results...';
+  // Poll until scan starts then finishes (or timeout)
+  await new Promise(r=>setTimeout(r,2500));
   let pollCount=0;
+  let scanEverStarted=false;
   const poll=setInterval(async()=>{
     pollCount++;
     const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
-    // show error if scan thread died
     if(s.last_error&&secAI)secAI.textContent='⚠ SCAN ERROR: '+s.last_error;
-    if(!s.scanning||pollCount>120){
+    if(s.scanning)scanEverStarted=true;
+    const done=scanEverStarted&&!s.scanning;
+    const timedOut=pollCount>150;
+    if(done||timedOut){
       clearInterval(poll);secLoad();
       const _labels={'secScanBtn':'▶ SCAN NOW','secScanClaude':'▶ CLAUDE','secScanGemini':'▶ GEMINI'};
       btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=_labels[id];}});
