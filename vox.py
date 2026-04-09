@@ -1680,10 +1680,7 @@ function secDismissAlert(){
 }
 async function secTriggerScan(ai){
   const btns=['secScanBtn','secScanClaude','secScanGemini'];
-  btns.forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=true;});
-  const activeId=ai==='claude'?'secScanClaude':ai==='gemini'?'secScanGemini':'secScanBtn';
-  const activeBtn=document.getElementById(activeId);
-  if(activeBtn)activeBtn.textContent='⟳ SCANNING...';
+  btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=true;b.textContent='⟳ SCANNING...';}});
   const secAI=document.getElementById('secAI');
   try{
     const res=await fetch('/api/security/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ai?{ai}:{})});
