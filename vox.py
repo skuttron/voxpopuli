@@ -1421,70 +1421,130 @@ def api_sec_status():
 def security_dashboard():
     if not is_admin(): return redirect("/")
     user=me();theme=session.get("theme","green")
-    content='''<div style="width:min(100%,960px);margin:0 auto;padding:16px;box-sizing:border-box;">
-<div style="border:2px solid var(--p);border-radius:var(--r);padding:20px;margin-bottom:20px;background:var(--p10);">
-  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
-    <h2 style="margin:0;letter-spacing:4px;font-size:clamp(14px,3vw,20px);">&#128737; SECURITY HUB</h2>
-    <div id="secHeaderBtns" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <a href="/" style="display:inline-flex;align-items:center;gap:6px;border:2px solid var(--p);border-radius:8px;padding:6px 14px;color:var(--p);background:var(--p10);font-family:'Courier New',monospace;font-size:11px;font-weight:bold;text-transform:uppercase;text-decoration:none;" onmouseover="this.style.background='var(--p)';this.style.color='#000'" onmouseout="this.style.background='var(--p10)';this.style.color='var(--p)'">&#8962; HOME</a>
-      <span id="secTarget" style="font-size:10px;opacity:.5;"></span>
-      <button class="btn-action" id="secScanBtn" onclick="secTriggerScan()" style="padding:7px 18px;font-size:11px;">&#9654; SCAN NOW</button>
-      <button class="btn-action" id="secScanClaude" onclick="secTriggerScan('claude')" style="padding:7px 14px;font-size:11px;border-color:#cc44ff;color:#cc44ff;">&#9654; CLAUDE</button>
-      <button class="btn-action" id="secScanGemini" onclick="secTriggerScan('gemini')" style="padding:7px 14px;font-size:11px;border-color:#4488ff;color:#4488ff;">&#9654; GEMINI</button>
-      <button class="btn-action" id="secDismissBtn" onclick="secDismissAlert()" style="display:none;padding:7px 18px;font-size:11px;border-color:#ff3355;color:#ff3355;">&#10006; DISMISS ALERT</button>
+    content='''
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
+.sec-wrap{width:min(100%,980px);margin:0 auto;padding:16px;box-sizing:border-box;font-family:'Rajdhani',sans-serif;}
+.sec-card{background:linear-gradient(135deg,var(--bg) 0%,color-mix(in srgb,var(--p) 4%,var(--bg)) 100%);border:1px solid color-mix(in srgb,var(--p) 25%,transparent);border-radius:12px;position:relative;overflow:hidden;}
+.sec-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--p),transparent);opacity:.6;}
+.sec-label{font-size:9px;letter-spacing:3px;text-transform:uppercase;opacity:.45;font-family:'Share Tech Mono',monospace;margin-bottom:6px;}
+.sec-val{font-size:32px;font-family:'Share Tech Mono',monospace;line-height:1;font-weight:400;}
+.sec-icon{font-size:18px;margin-bottom:6px;opacity:.7;}
+.sec-stat-ok{color:var(--p);}
+.sec-stat-warn{color:#ffaa00;}
+.sec-stat-danger{color:#ff3355;}
+.sec-panel{background:color-mix(in srgb,var(--p) 3%,var(--bg));border:1px solid color-mix(in srgb,var(--p) 18%,transparent);border-radius:10px;padding:14px;position:relative;}
+.sec-panel-title{font-size:10px;letter-spacing:3px;text-transform:uppercase;opacity:.4;font-family:'Share Tech Mono',monospace;margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+.sec-panel-title::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,color-mix(in srgb,var(--p) 20%,transparent),transparent);}
+.sec-row{padding:6px 0;border-bottom:1px solid color-mix(in srgb,var(--p) 8%,transparent);font-size:11px;word-break:break-all;display:flex;align-items:flex-start;gap:6px;font-family:'Share Tech Mono',monospace;}
+.sec-row:last-child{border-bottom:none;}
+.sec-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;font-family:'Share Tech Mono',monospace;letter-spacing:1px;white-space:nowrap;flex-shrink:0;}
+.sec-ai-box{background:color-mix(in srgb,var(--p) 5%,var(--bg));border-left:3px solid var(--p);border-radius:0 8px 8px 0;padding:14px 16px;}
+.sec-tab-btn{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;padding:5px 10px;border-radius:5px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+.sec-scan-btn{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:12px;letter-spacing:2px;padding:8px 18px;border-radius:8px;cursor:pointer;border:1.5px solid;transition:all .2s;text-transform:uppercase;}
+.sec-scan-btn:hover{filter:brightness(1.2);}
+.sec-scan-btn:disabled{opacity:.4;cursor:not-allowed;}
+@keyframes secPulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes secSlideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.sec-animate{animation:secSlideIn .3s ease forwards;}
+@media(max-width:600px){
+  .sec-stats-grid{grid-template-columns:repeat(2,1fr)!important;}
+  .sec-detail-grid{grid-template-columns:1fr!important;}
+  #secHeaderBtns{flex-wrap:wrap;}
+}
+</style>
+<div class="sec-wrap">
+
+  <!-- HEADER -->
+  <div class="sec-card" style="padding:18px 20px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+      <div>
+        <div class="sec-label" style="margin-bottom:2px;">System Monitor</div>
+        <h2 style="margin:0;font-size:clamp(18px,4vw,26px);letter-spacing:5px;font-weight:700;font-family:'Rajdhani',sans-serif;">&#128737; SECURITY HUB</h2>
+        <div style="font-size:10px;opacity:.35;font-family:'Share Tech Mono',monospace;margin-top:3px;">TARGET: <span id="secTarget">—</span></div>
+      </div>
+      <div id="secHeaderBtns" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <a href="/" class="sec-scan-btn" style="border-color:color-mix(in srgb,var(--p) 50%,transparent);color:var(--p);background:color-mix(in srgb,var(--p) 8%,transparent);text-decoration:none;display:inline-flex;align-items:center;gap:5px;" onmouseover="this.style.background='color-mix(in srgb,var(--p) 18%,transparent)'" onmouseout="this.style.background='color-mix(in srgb,var(--p) 8%,transparent)'">⌂ HOME</a>
+        <button class="sec-scan-btn" id="secScanBtn" onclick="secTriggerScan()" style="border-color:var(--p);color:#000;background:var(--p);">▶ SCAN NOW</button>
+        <button class="sec-scan-btn" id="secScanClaude" onclick="secTriggerScan('claude')" style="border-color:#cc44ff;color:#cc44ff;background:color-mix(in srgb,#cc44ff 8%,transparent);">▶ CLAUDE</button>
+        <button class="sec-scan-btn" id="secScanGemini" onclick="secTriggerScan('gemini')" style="border-color:#4488ff;color:#4488ff;background:color-mix(in srgb,#4488ff 8%,transparent);">▶ GEMINI</button>
+        <button class="sec-scan-btn" id="secDismissBtn" onclick="secDismissAlert()" style="display:none;border-color:#ff3355;color:#ff3355;background:color-mix(in srgb,#ff3355 8%,transparent);">✖ DISMISS</button>
+      </div>
     </div>
   </div>
-  <style>@media(max-width:600px){#secHeaderBtns{width:100%;justify-content:flex-start;}}</style>
-  <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px 14px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;</div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;">
-    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">PAGES SCANNED</div>
-      <div id="secPages" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+
+  <!-- ALERT BANNER -->
+  <div id="secAlertBanner" style="display:none;background:linear-gradient(135deg,#ff0033,#aa0022);color:#fff;padding:12px 18px;border-radius:10px;text-align:center;font-size:11px;letter-spacing:4px;margin-bottom:16px;font-family:'Share Tech Mono',monospace;animation:secPulse 1.5s infinite;border:1px solid #ff3355;">
+    ⚠ CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED ⚠
+  </div>
+
+  <!-- STAT CARDS -->
+  <div class="sec-stats-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px;">
+    <div class="sec-card" style="padding:16px 12px;text-align:center;">
+      <div class="sec-icon">📄</div>
+      <div class="sec-label">PAGES</div>
+      <div id="secPages" class="sec-val sec-stat-ok">—</div>
     </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secSSLCard">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">SSL CERT</div>
-      <div id="secSSL" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
-      <div id="secSSLSub" style="font-size:9px;opacity:.5;margin-top:3px;"></div>
+    <div class="sec-card" style="padding:16px 12px;text-align:center;" id="secSSLCard">
+      <div class="sec-icon">🔒</div>
+      <div class="sec-label">SSL CERT</div>
+      <div id="secSSL" class="sec-val sec-stat-ok">—</div>
+      <div id="secSSLSub" style="font-size:9px;opacity:.4;margin-top:4px;font-family:'Share Tech Mono',monospace;"></div>
     </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secBrokenCard">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">BROKEN LINKS</div>
-      <div id="secBroken" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+    <div class="sec-card" style="padding:16px 12px;text-align:center;" id="secBrokenCard">
+      <div class="sec-icon">🔗</div>
+      <div class="sec-label">BROKEN</div>
+      <div id="secBroken" class="sec-val sec-stat-ok">—</div>
     </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;" id="secHarmfulCard">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">HARMFUL CONTENT</div>
-      <div id="secHarmful" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+    <div class="sec-card" style="padding:16px 12px;text-align:center;" id="secHarmfulCard">
+      <div class="sec-icon">☣</div>
+      <div class="sec-label">HARMFUL</div>
+      <div id="secHarmful" class="sec-val sec-stat-ok">—</div>
     </div>
-    <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">CHANGES</div>
-      <div id="secChanges" style="font-size:28px;font-family:'Courier New',monospace;">—</div>
+    <div class="sec-card" style="padding:16px 12px;text-align:center;">
+      <div class="sec-icon">⟳</div>
+      <div class="sec-label">CHANGES</div>
+      <div id="secChanges" class="sec-val sec-stat-ok">—</div>
     </div>
   </div>
-  <div style="border:1px solid var(--p30);border-radius:8px;padding:14px;margin-bottom:14px;">
-    <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9672; AI ANALYSIS</div>
-    <div id="secAI" style="font-size:12px;line-height:1.7;font-family:'Courier New',monospace;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;opacity:.85;">Awaiting scan data...</div>
-  </div>
-  <style>@media(max-width:600px){#secDetailGrid{grid-template-columns:1fr!important;}#secDetailGrid [style*="grid-column:span 2"]{grid-column:span 1!important;}}</style>
-  <div id="secDetailGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128279; BROKEN LINKS</div>
-      <div id="secBrokenList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
-    </div>
-    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9888; HARMFUL CONTENT</div>
-      <div id="secHarmfulList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
-    </div>
-    <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
-      <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128196; CONTENT CHANGES</div>
-      <div id="secChangesList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
+
+  <!-- AI ANALYSIS -->
+  <div style="margin-bottom:16px;">
+    <div class="sec-panel-title" style="margin-bottom:8px;">◈ AI ANALYSIS</div>
+    <div class="sec-ai-box">
+      <div id="secAI" style="font-size:12px;line-height:1.8;font-family:'Share Tech Mono',monospace;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;opacity:.85;">Awaiting scan data...</div>
     </div>
   </div>
-  <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;margin-top:12px;">
-    <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:10px;">&#128200; SCAN HISTORY</div>
-    <div id="secHistoryTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
-    <div id="secHistoryDetail" style="font-size:11px;min-height:60px;"></div>
+
+  <!-- DETAIL GRID: broken / harmful / changes -->
+  <div class="sec-detail-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
+    <div class="sec-panel">
+      <div class="sec-panel-title">🔗 Broken Links</div>
+      <div id="secBrokenList" style="max-height:180px;overflow-y:auto;"></div>
+    </div>
+    <div class="sec-panel">
+      <div class="sec-panel-title">⚠ Harmful Content</div>
+      <div id="secHarmfulList" style="max-height:180px;overflow-y:auto;"></div>
+    </div>
+    <div class="sec-panel">
+      <div class="sec-panel-title">📄 Content Changes</div>
+      <div id="secChangesList" style="max-height:180px;overflow-y:auto;"></div>
+    </div>
   </div>
-  <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;word-break:break-word;overflow-wrap:anywhere;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; NEXT SCAN: <span id="secNextScan">—</span> &nbsp;|&nbsp; INTERVAL: <span id="secInterval">—</span> MIN</div>
-</div></div>
+
+  <!-- SCAN HISTORY -->
+  <div class="sec-panel" style="margin-bottom:16px;">
+    <div class="sec-panel-title">📈 Scan History</div>
+    <div id="secHistoryTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;"></div>
+    <div id="secHistoryDetail" style="min-height:60px;"></div>
+  </div>
+
+  <!-- FOOTER -->
+  <div style="font-size:9px;opacity:.3;text-align:right;letter-spacing:2px;font-family:'Share Tech Mono',monospace;word-break:break-word;overflow-wrap:anywhere;padding:0 4px;">
+    LAST SCAN: <span id="secLastScan">—</span> &nbsp;│&nbsp; NEXT SCAN: <span id="secNextScan">—</span> &nbsp;│&nbsp; INTERVAL: <span id="secInterval">—</span> MIN
+  </div>
+
+</div>
 <script>
 async function secLoad(){
   const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
@@ -1499,18 +1559,19 @@ async function secLoad(){
   }else{if(!window._secAlertDismissed){banner.style.display='none';document.getElementById('secDismissBtn').style.display='none';}}
   document.getElementById('secPages').textContent=r.pages_scanned??'—';
   const sslOk=r.ssl?.ok;const sslDays=r.ssl?.days_left??'?';
-  document.getElementById('secSSL').textContent=sslOk?sslDays+'d':'⚠';
-  document.getElementById('secSSL').style.color=sslOk?'var(--p)':'#ff3355';
-  document.getElementById('secSSLSub').textContent=sslOk?`expires in ${sslDays} days`:'CERTIFICATE ISSUE';
   const bl=r.broken_links?.length??0;
-  document.getElementById('secBroken').textContent=bl;
-  document.getElementById('secBroken').style.color=bl>0?'#ffaa00':'var(--p)';
   const hm=r.harmful_content?.length??0;
-  document.getElementById('secHarmful').textContent=hm;
-  document.getElementById('secHarmful').style.color=hm>0?'#ff3355':'var(--p)';
   const ch=r.content_changes?.length??0;
-  document.getElementById('secChanges').textContent=ch;
-  document.getElementById('secChanges').style.color=ch>0?'#ffaa00':'var(--p)';
+  const sslEl=document.getElementById('secSSL');
+  sslEl.textContent=sslOk?sslDays+'d':'⚠';
+  sslEl.className='sec-val '+(sslOk?'sec-stat-ok':'sec-stat-danger');
+  document.getElementById('secSSLSub').textContent=sslOk?`expires in ${sslDays} days`:'CERTIFICATE ISSUE';
+  const blEl=document.getElementById('secBroken');
+  blEl.textContent=bl;blEl.className='sec-val '+(bl>0?'sec-stat-warn':'sec-stat-ok');
+  const hmEl=document.getElementById('secHarmful');
+  hmEl.textContent=hm;hmEl.className='sec-val '+(hm>0?'sec-stat-danger':'sec-stat-ok');
+  const chEl=document.getElementById('secChanges');
+  chEl.textContent=ch;chEl.className='sec-val '+(ch>0?'sec-stat-warn':'sec-stat-ok');
   document.getElementById('secAI').textContent=r.ai_analysis||'No analysis.';
   document.getElementById('secLastScan').textContent=r.timestamp?new Date(r.timestamp).toLocaleString():'—';
   const intEl=document.getElementById('secInterval');if(intEl)intEl.textContent=s.interval||'?';
@@ -1527,20 +1588,20 @@ async function secLoad(){
     }
   }
   const bll=document.getElementById('secBrokenList');
-  bll.innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
+  bll.innerHTML=bl?r.broken_links.map(b=>`<div class="sec-row"><span class="sec-badge" style="background:color-mix(in srgb,#ffaa00 15%,transparent);color:#ffaa00;border:1px solid color-mix(in srgb,#ffaa00 30%,transparent);">${b.status}</span><span style="opacity:.8;">${b.url}</span></div>`).join(''):'<div style="opacity:.35;font-size:10px;font-family:\'Share Tech Mono\',monospace;padding:6px 0;">✓ None detected</div>';
   const hml=document.getElementById('secHarmfulList');
   hml.innerHTML=hm?r.harmful_content.map(h=>`
-    <div style="padding:8px;margin-bottom:6px;border:1px solid #ff3355;border-radius:6px;background:#1a0005;">
+    <div style="padding:8px;margin-bottom:6px;border:1px solid color-mix(in srgb,#ff3355 35%,transparent);border-radius:8px;background:color-mix(in srgb,#ff3355 6%,transparent);">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;margin-bottom:4px;">
-        <span style="color:#ff3355;font-size:11px;font-weight:bold;">⚠ ${h.source?.toUpperCase()||'PAGE'} — ${h.url}</span>
-        ${h.timestamp?`<span style="opacity:.4;font-size:9px;">${new Date(h.timestamp).toLocaleString()}</span>`:''}
+        <span style="color:#ff3355;font-size:10px;font-family:\'Share Tech Mono\',monospace;font-weight:bold;word-break:break-all;">⚠ ${h.source?.toUpperCase()||'PAGE'} — ${h.url}</span>
+        ${h.timestamp?`<span style="opacity:.35;font-size:9px;font-family:\'Share Tech Mono\',monospace;">${new Date(h.timestamp).toLocaleString()}</span>`:''}
       </div>
-      ${h.username?`<div style="font-size:11px;margin-bottom:3px;">👤 <span style="color:#ff8800;">${h.username}</span></div>`:''}
-      ${h.message?`<div style="font-size:11px;background:#0a0000;border-radius:4px;padding:5px 8px;margin-bottom:4px;word-break:break-word;opacity:.9;">"${h.message}"</div>`:''}
-      <div style="font-size:9px;color:#ff3355;letter-spacing:1px;">KEYWORDS: ${h.keywords.join(', ')}</div>
-    </div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
+      ${h.username?`<div style="font-size:11px;margin-bottom:3px;font-family:\'Share Tech Mono\',monospace;">👤 <span style="color:#ff8800;">${h.username}</span></div>`:''}
+      ${h.message?`<div style="font-size:11px;background:color-mix(in srgb,#ff3355 8%,transparent);border-radius:4px;padding:5px 8px;margin-bottom:4px;word-break:break-word;opacity:.9;font-family:\'Share Tech Mono\',monospace;">"${h.message}"</div>`:''}
+      <div style="font-size:9px;color:#ff3355;letter-spacing:1px;font-family:\'Share Tech Mono\',monospace;">KEYWORDS: ${h.keywords.join(', ')}</div>
+    </div>`).join(''):'<div style="opacity:.35;font-size:10px;font-family:\'Share Tech Mono\',monospace;padding:6px 0;">✓ None detected</div>';
   const chl=document.getElementById('secChangesList');
-  chl.innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
+  chl.innerHTML=ch?r.content_changes.map(c=>`<div class="sec-row"><span class="sec-badge" style="background:color-mix(in srgb,#ffaa00 15%,transparent);color:#ffaa00;border:1px solid color-mix(in srgb,#ffaa00 30%,transparent);">CHG</span><span style="opacity:.8;">${c.url}</span></div>`).join(''):'<div style="opacity:.35;font-size:10px;font-family:\'Share Tech Mono\',monospace;padding:6px 0;">✓ No changes</div>';
   const pgl=document.getElementById('secPagesList');
   if(pgl){const pl=r.pages_list||[];pgl.innerHTML=pl.length?pl.map((p,i)=>`<div style="padding:3px 0;border-bottom:1px solid var(--p10);word-break:break-all;opacity:.8;"><span style="color:var(--p);margin-right:6px;">${i+1}.</span>${p}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">No data</div>';}
   window._secReports=d.reports;
@@ -1556,7 +1617,7 @@ function secBuildHistoryTabs(reports,activeIdx){
     const dt=new Date(rpt.timestamp);
     const label=dt.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+dt.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
     const isActive=i===activeIdx;
-    return `<button onclick="secBuildHistoryTabs(window._secReports,${i})" style="font-family:'Courier New',monospace;font-size:9px;letter-spacing:1px;padding:5px 9px;border-radius:6px;cursor:pointer;border:1px solid ${col};color:${isActive?'#000':col};background:${isActive?col:'transparent'};transition:all .15s;">${i===0?'LATEST':label}</button>`;
+    return `<button onclick="secBuildHistoryTabs(window._secReports,${i})" class="sec-tab-btn" style="border:1px solid ${col};color:${isActive?'#000':col};background:${isActive?col:'transparent'};">${i===0?'◉ LATEST':label}</button>`;
   }).join('');
   const rpt=reports[activeIdx];
   if(!rpt){detail.innerHTML='<div style="opacity:.4;">No data</div>';return;}
@@ -1567,26 +1628,30 @@ function secBuildHistoryTabs(reports,activeIdx){
   const sslOk=rpt.ssl?.ok;const sslDays=rpt.ssl?.days_left??'?';
   const pl=rpt.pages_list||[];
   detail.innerHTML=`
-    <div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:8px;">${dt.toLocaleString()} &nbsp;·&nbsp; ${rpt.pages_scanned??'?'} pages &nbsp;·&nbsp; SSL: ${sslOk?sslDays+'d ✓':'⚠ ISSUE'}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div style="border:1px solid var(--p20);border-radius:6px;padding:8px;">
-        <div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">&#128279; BROKEN LINKS</div>
-        ${bl?rpt.broken_links.map(b=>`<div style="padding:3px 0;word-break:break-all;font-size:10px;border-bottom:1px solid var(--p10);"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None</div>'}
+    <div style="font-size:9px;opacity:.4;letter-spacing:2px;margin-bottom:12px;font-family:'Share Tech Mono',monospace;padding:6px 10px;background:color-mix(in srgb,var(--p) 6%,transparent);border-radius:6px;display:inline-flex;gap:16px;flex-wrap:wrap;">
+      <span>🕐 ${dt.toLocaleString()}</span>
+      <span>📄 ${rpt.pages_scanned??'?'} pages</span>
+      <span style="color:${sslOk?'var(--p)':'#ff3355'};">🔒 SSL: ${sslOk?sslDays+'d ✓':'⚠ ISSUE'}</span>
+    </div>
+    <div class="sec-detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+      <div class="sec-panel">
+        <div class="sec-panel-title">🔗 Broken Links</div>
+        ${bl?rpt.broken_links.map(b=>`<div class="sec-row"><span class="sec-badge" style="background:color-mix(in srgb,#ffaa00 15%,transparent);color:#ffaa00;border:1px solid color-mix(in srgb,#ffaa00 30%,transparent);">${b.status}</span><span style="opacity:.8;">${b.url}</span></div>`).join(''):'<div style="opacity:.35;font-size:10px;font-family:\'Share Tech Mono\',monospace;padding:6px 0;">✓ None</div>'}
       </div>
-      <div style="border:1px solid var(--p20);border-radius:6px;padding:8px;">
-        <div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">&#9888; HARMFUL</div>
-        ${hm?rpt.harmful_content.map(h=>`<div style="padding:3px 0;word-break:break-all;font-size:10px;border-bottom:1px solid var(--p10);color:#ff3355;">${h.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None</div>'}
+      <div class="sec-panel">
+        <div class="sec-panel-title">⚠ Harmful</div>
+        ${hm?rpt.harmful_content.map(h=>`<div class="sec-row" style="color:#ff3355;">${h.url}</div>`).join(''):'<div style="opacity:.35;font-size:10px;font-family:\'Share Tech Mono\',monospace;padding:6px 0;">✓ None</div>'}
       </div>
-      <div style="border:1px solid var(--p20);border-radius:6px;padding:8px;">
-        <div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">&#128196; CHANGES</div>
-        ${ch?rpt.content_changes.map(c=>`<div style="padding:3px 0;word-break:break-all;font-size:10px;border-bottom:1px solid var(--p10);"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None</div>'}
+      <div class="sec-panel">
+        <div class="sec-panel-title">📄 Changes</div>
+        ${ch?rpt.content_changes.map(c=>`<div class="sec-row"><span class="sec-badge" style="background:color-mix(in srgb,#ffaa00 15%,transparent);color:#ffaa00;border:1px solid color-mix(in srgb,#ffaa00 30%,transparent);">CHG</span><span style="opacity:.8;">${c.url}</span></div>`).join(''):'<div style="opacity:.35;font-size:10px;font-family:\'Share Tech Mono\',monospace;padding:6px 0;">✓ None</div>'}
       </div>
-      <div style="border:1px solid var(--p20);border-radius:6px;padding:8px;">
-        <div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">&#128269; PAGES</div>
-        ${pl.length?pl.map((p,i)=>`<div style="padding:3px 0;word-break:break-all;font-size:10px;border-bottom:1px solid var(--p10);opacity:.8;"><span style="color:var(--p);margin-right:4px;">${i+1}.</span>${p}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">No data</div>'}
+      <div class="sec-panel">
+        <div class="sec-panel-title">🔍 Pages</div>
+        ${pl.length?pl.map((p,i)=>`<div class="sec-row"><span style="color:var(--p);min-width:18px;font-family:'Share Tech Mono',monospace;">${i+1}.</span><span style="opacity:.75;">${p}</span></div>`).join(''):'<div style="opacity:.35;font-size:10px;font-family:\'Share Tech Mono\',monospace;padding:6px 0;">No data</div>'}
       </div>
     </div>
-    ${rpt.ai_analysis?`<div style="border:1px solid var(--p20);border-radius:6px;padding:8px;"><div style="font-size:9px;opacity:.5;letter-spacing:1px;margin-bottom:4px;">&#9672; AI ANALYSIS</div><div style="font-size:11px;line-height:1.6;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;opacity:.85;">${rpt.ai_analysis}</div></div>`:''}
+    ${rpt.ai_analysis?`<div class="sec-ai-box sec-animate"><div style="font-size:9px;opacity:.4;letter-spacing:2px;margin-bottom:8px;font-family:'Share Tech Mono',monospace;">◈ AI ANALYSIS</div><div style="font-size:11px;line-height:1.8;font-family:'Share Tech Mono',monospace;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;opacity:.85;">${rpt.ai_analysis}</div></div>`:''}
   `;
 }
 function secDismissAlert(){
