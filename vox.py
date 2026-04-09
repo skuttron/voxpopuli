@@ -1719,6 +1719,16 @@ async function secTriggerScan(ai){
 }
 secLoad();setInterval(secLoad,30000);
 </script>'''
-    return shell(content,user=user,theme=theme)
+    t=THEMES.get(theme,THEMES["green"])
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap">
+<style>{theme_css(theme)}</style>
+</head><body>
+<div class="crt-overlay"></div><div class="scanline-a"></div><div class="scanline-b"></div><div class="scanline-c"></div>
+{content}
+</body></html>"""
 
 if __name__=="__main__": app.run(debug=False)
