@@ -1147,7 +1147,10 @@ def handle_exception(e):
 # ══════════════════════════════════════════════════════════════════════════════
 # SECURITY HUB — integrated scanner
 # ══════════════════════════════════════════════════════════════════════════════
-_SEC_TARGET      = os.environ.get("TARGET_URL","")         # site to scan (set in Railway vars)
+try:
+    import requests as _requests_lib
+except ImportError:
+    _requests_lib=None
 _SEC_MAX_PAGES   = int(os.environ.get("SEC_MAX_PAGES","80"))
 _SEC_INTERVAL    = int(os.environ.get("SEC_INTERVAL_MINS","180"))
 _SEC_USERNAME    = os.environ.get("SEC_USERNAME","")       # admin username for scanner login
@@ -1172,8 +1175,9 @@ def _sec_save_state(s):
     with open(_SEC_STATE_FILE,"w") as f: _json.dump(s,f)
 
 def _sec_get_session():
-    import requests as _req
-    s=_req.Session()
+    if _requests_lib is None:
+        raise RuntimeError("requests library not installed — run: pip install requests")
+    s=_requests_lib.Session()
     s.headers.update({"User-Agent":"VoxSecBot/1.0"})
     if not _SEC_TARGET or not _SEC_USERNAME or not _SEC_PASSWORD_ENC:
         return s
@@ -1397,13 +1401,21 @@ def api_sec_reports():
         with open(_SEC_REPORTS_FILE) as f: return jsonify({"ok":True,"reports":_json.load(f)})
     return ok(reports=[])
 
+_SEC_LAST_ERROR={"msg":None}
+
 @app.route("/api/security/scan",methods=["POST"])
 def api_sec_scan():
     if e:=require_admin(): return e
     if _SEC_LOCK.locked(): return err("SCAN ALREADY RUNNING")
+    if not _SEC_TARGET: return err("TARGET_URL not set in environment variables")
     ai_only=(request.json or {}).get("ai",None)
     def _run():
-        with _SEC_LOCK: _sec_run_scan(ai_only=ai_only)
+        _SEC_LAST_ERROR["msg"]=None
+        try:
+            with _SEC_LOCK: _sec_run_scan(ai_only=ai_only)
+        except Exception as e:
+            _SEC_LAST_ERROR["msg"]=str(e)
+            app.logger.error(f"Security scan failed: {e}")
     threading.Thread(target=_run,daemon=True).start()
     return ok(status="started")
 
@@ -1415,7 +1427,7 @@ def api_sec_status():
         with open(_SEC_REPORTS_FILE) as f:
             rpts=_json.load(f)
             if rpts: last=rpts[0].get("timestamp")
-    return ok(scanning=_SEC_LOCK.locked(),last_scan=last,target=_SEC_TARGET,interval=_SEC_INTERVAL)
+    return ok(scanning=_SEC_LOCK.locked(),last_scan=last,target=_SEC_TARGET,interval=_SEC_INTERVAL,last_error=_SEC_LAST_ERROR["msg"])
 
 @app.route("/security")
 def security_dashboard():
@@ -1667,14 +1679,36 @@ function secDismissAlert(){
 }
 async function secTriggerScan(ai){
   const btns=['secScanBtn','secScanClaude','secScanGemini'];
-  btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=true;}});
+  btns.forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=true;});
   const activeId=ai==='claude'?'secScanClaude':ai==='gemini'?'secScanGemini':'secScanBtn';
   const activeBtn=document.getElementById(activeId);
   if(activeBtn)activeBtn.textContent='⟳ SCANNING...';
-  await fetch('/api/security/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ai?{ai}:{})});
+  const secAI=document.getElementById('secAI');
+  try{
+    const res=await fetch('/api/security/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ai?{ai}:{})});
+    const j=await res.json();
+    if(!j.ok){
+      if(secAI)secAI.textContent='⚠ SCAN ERROR: '+j.error;
+      btns.forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=false;});
+      document.getElementById('secScanBtn').textContent='▶ SCAN NOW';
+      document.getElementById('secScanClaude').textContent='▶ CLAUDE';
+      document.getElementById('secScanGemini').textContent='▶ GEMINI';
+      return;
+    }
+  }catch(e){
+    if(secAI)secAI.textContent='⚠ NETWORK ERROR: '+e.message;
+    btns.forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=false;});
+    return;
+  }
+  // small delay to let the lock acquire before first poll
+  await new Promise(r=>setTimeout(r,1500));
+  let pollCount=0;
   const poll=setInterval(async()=>{
+    pollCount++;
     const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
-    if(!s.scanning){
+    // show error if scan thread died
+    if(s.last_error&&secAI)secAI.textContent='⚠ SCAN ERROR: '+s.last_error;
+    if(!s.scanning||pollCount>120){
       clearInterval(poll);secLoad();
       btns.forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=false;});
       document.getElementById('secScanBtn').textContent='▶ SCAN NOW';
