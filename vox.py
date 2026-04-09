@@ -1500,6 +1500,7 @@ def security_dashboard():
         <button class="sec-scan-btn" id="secScanGemini" onclick="secTriggerScan('gemini')" style="border-color:#4488ff;color:#4488ff;background:color-mix(in srgb,#4488ff 8%,transparent);">▶ GEMINI</button>
         <button class="sec-scan-btn" id="secDismissBtn" onclick="secDismissAlert()" style="display:none;border-color:#ff3355;color:#ff3355;background:color-mix(in srgb,#ff3355 8%,transparent);">✖ DISMISS</button>
         <button class="sec-scan-btn" onclick="secDebug()" style="border-color:#888;color:#888;background:color-mix(in srgb,#888 8%,transparent);font-size:10px;">⚙ DEBUG</button>
+        <button class="sec-scan-btn" onclick="alert('CLICK WORKS - JS OK')" style="border-color:#0f0;color:#0f0;background:color-mix(in srgb,#0f0 8%,transparent);font-size:10px;">✓ TEST</button>
       </div>
     </div>
   </div>
