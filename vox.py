@@ -1482,7 +1482,7 @@ def api_sec_test_scan():
 def api_sec_scan():
     if e:=require_admin(): return e
     if _SEC_LOCK.locked(): return err("SCAN ALREADY RUNNING")
-    if not _SEC_TARGET: return err("TARGET_URL not set in environment variables")
+    if not _SEC_TARGET: return err("TARGET_URL environment variable is not set. Add TARGET_URL=https://yoursite.com to your environment.")
     ai_only=(request.json or {}).get("ai",None)
     def _run():
         _SEC_LAST_ERROR["msg"]=None
@@ -1552,12 +1552,11 @@ def security_dashboard():
       </div>
       <div id="secHeaderBtns" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <a href="/" class="sec-scan-btn" style="border-color:color-mix(in srgb,var(--p) 50%,transparent);color:var(--p);background:color-mix(in srgb,var(--p) 8%,transparent);text-decoration:none;display:inline-flex;align-items:center;gap:5px;" onmouseover="this.style.background='color-mix(in srgb,var(--p) 18%,transparent)'" onmouseout="this.style.background='color-mix(in srgb,var(--p) 8%,transparent)'">⌂ HOME</a>
-        <button class="sec-scan-btn" id="secScanBtn" onclick="document.getElementById('secAI').textContent='SCAN BTN CLICKED';fetch('/api/security/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(j=>document.getElementById('secAI').textContent=JSON.stringify(j)).catch(e=>document.getElementById('secAI').textContent='ERR:'+e)" style="border-color:var(--p);color:#000;background:var(--p);">▶ SCAN NOW</button>
-        <button class="sec-scan-btn" id="secScanClaude" onclick="document.getElementById('secAI').textContent='CLAUDE BTN CLICKED';fetch('/api/security/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:'{\"ai\":\"claude\"}'}).then(r=>r.json()).then(j=>document.getElementById('secAI').textContent=JSON.stringify(j)).catch(e=>document.getElementById('secAI').textContent='ERR:'+e)" style="border-color:#cc44ff;color:#cc44ff;background:color-mix(in srgb,#cc44ff 8%,transparent);">▶ CLAUDE</button>
-        <button class="sec-scan-btn" id="secScanGemini" onclick="document.getElementById('secAI').textContent='GEMINI BTN CLICKED';fetch('/api/security/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:'{\"ai\":\"gemini\"}'}).then(r=>r.json()).then(j=>document.getElementById('secAI').textContent=JSON.stringify(j)).catch(e=>document.getElementById('secAI').textContent='ERR:'+e)" style="border-color:#4488ff;color:#4488ff;background:color-mix(in srgb,#4488ff 8%,transparent);">▶ GEMINI</button>
+        <button class="sec-scan-btn" id="secScanBtn" onclick="secTriggerScan(null)" style="border-color:var(--p);color:#000;background:var(--p);">▶ SCAN NOW</button>
+        <button class="sec-scan-btn" id="secScanClaude" onclick="secTriggerScan('claude')" style="border-color:#cc44ff;color:#cc44ff;background:color-mix(in srgb,#cc44ff 8%,transparent);">▶ CLAUDE</button>
+        <button class="sec-scan-btn" id="secScanGemini" onclick="secTriggerScan('gemini')" style="border-color:#4488ff;color:#4488ff;background:color-mix(in srgb,#4488ff 8%,transparent);">▶ GEMINI</button>
         <button class="sec-scan-btn" id="secDismissBtn" onclick="secDismissAlert()" style="display:none;border-color:#ff3355;color:#ff3355;background:color-mix(in srgb,#ff3355 8%,transparent);">✖ DISMISS</button>
         <button class="sec-scan-btn" onclick="secDebug()" style="border-color:#888;color:#888;background:color-mix(in srgb,#888 8%,transparent);font-size:10px;">⚙ DEBUG</button>
-        <button class="sec-scan-btn" onclick="secTestScan()" style="border-color:#0ff;color:#0ff;background:color-mix(in srgb,#0ff 8%,transparent);font-size:10px;">⚙ TEST SCAN</button>
       </div>
     </div>
   </div>
@@ -1756,47 +1755,30 @@ function secDismissAlert(){
 }
 async function secTriggerScan(ai){
   const btns=['secScanBtn','secScanClaude','secScanGemini'];
+  const labels={'secScanBtn':'▶ SCAN NOW','secScanClaude':'▶ CLAUDE','secScanGemini':'▶ GEMINI'};
   btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=true;b.textContent='⟳ SCANNING...';}});
   const secAI=document.getElementById('secAI');
-  if(secAI)secAI.textContent='⟳ Sending scan request...';
-  console.log('[SEC] secTriggerScan called, ai='+ai);
+  const reset=()=>btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=labels[id];}});
   try{
-    console.log('[SEC] POSTing to /api/security/scan...');
     const res=await fetch('/api/security/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ai?{ai}:{})});
-    console.log('[SEC] Response status: '+res.status);
     const j=await res.json();
-    console.log('[SEC] Response JSON:', JSON.stringify(j));
     if(!j.ok){
-      if(secAI)secAI.textContent='⚠ SCAN ERROR: '+j.error;
-      const _labels={'secScanBtn':'▶ SCAN NOW','secScanClaude':'▶ CLAUDE','secScanGemini':'▶ GEMINI'};
-      btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=_labels[id];}});
-      return;
+      if(secAI)secAI.textContent='⚠ '+j.error;
+      reset();return;
     }
   }catch(e){
-    console.log('[SEC] FETCH ERROR: '+e.message);
     if(secAI)secAI.textContent='⚠ NETWORK ERROR: '+e.message;
-    const _labels={'secScanBtn':'▶ SCAN NOW','secScanClaude':'▶ CLAUDE','secScanGemini':'▶ GEMINI'};
-    btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=_labels[id];}});
-    return;
+    reset();return;
   }
-  if(secAI)secAI.textContent='⟳ Scan started, waiting for results...';
-  // Poll until scan starts then finishes (or timeout)
-  await new Promise(r=>setTimeout(r,2500));
-  let pollCount=0;
-  let scanEverStarted=false;
+  if(secAI)secAI.textContent='⟳ Scan running...';
+  let pollCount=0,started=false;
   const poll=setInterval(async()=>{
     pollCount++;
     const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
-    if(s.last_error&&secAI)secAI.textContent='⚠ SCAN ERROR: '+s.last_error;
-    if(s.scanning)scanEverStarted=true;
-    const done=scanEverStarted&&!s.scanning;
-    const timedOut=pollCount>150;
-    if(done||timedOut){
-      clearInterval(poll);secLoad();
-      const _labels={'secScanBtn':'▶ SCAN NOW','secScanClaude':'▶ CLAUDE','secScanGemini':'▶ GEMINI'};
-      btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=_labels[id];}});
-    }
-  },3000);
+    if(s.last_error){if(secAI)secAI.textContent='⚠ SCAN FAILED: '+s.last_error;clearInterval(poll);reset();return;}
+    if(s.scanning)started=true;
+    if((started&&!s.scanning)||pollCount>150){clearInterval(poll);secLoad();reset();}
+  },2000);
 }
 async function secTestScan(){
   const secAI=document.getElementById('secAI');
