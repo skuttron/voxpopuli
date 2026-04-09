@@ -1404,6 +1404,23 @@ def api_sec_reports():
 
 _SEC_LAST_ERROR={"msg":None}
 
+@app.route("/api/security/debug")
+def api_sec_debug():
+    if not is_admin(): return err("FORBIDDEN")
+    import sys
+    return jsonify({
+        "ok": True,
+        "TARGET_URL_env": os.environ.get("TARGET_URL","<NOT SET>"),
+        "_SEC_TARGET": _SEC_TARGET,
+        "_SEC_TARGET_bool": bool(_SEC_TARGET),
+        "lock_locked": _SEC_LOCK.locked(),
+        "last_error": _SEC_LAST_ERROR.get("msg"),
+        "requests_lib": str(_requests_lib),
+        "anthropic_client": str(_anthropic_client),
+        "python_version": sys.version,
+        "reports_file_exists": os.path.exists(_SEC_REPORTS_FILE),
+    })
+
 @app.route("/api/security/scan",methods=["POST"])
 def api_sec_scan():
     if e:=require_admin(): return e
@@ -1482,6 +1499,7 @@ def security_dashboard():
         <button class="sec-scan-btn" id="secScanClaude" onclick="secTriggerScan('claude')" style="border-color:#cc44ff;color:#cc44ff;background:color-mix(in srgb,#cc44ff 8%,transparent);">▶ CLAUDE</button>
         <button class="sec-scan-btn" id="secScanGemini" onclick="secTriggerScan('gemini')" style="border-color:#4488ff;color:#4488ff;background:color-mix(in srgb,#4488ff 8%,transparent);">▶ GEMINI</button>
         <button class="sec-scan-btn" id="secDismissBtn" onclick="secDismissAlert()" style="display:none;border-color:#ff3355;color:#ff3355;background:color-mix(in srgb,#ff3355 8%,transparent);">✖ DISMISS</button>
+        <button class="sec-scan-btn" onclick="secDebug()" style="border-color:#888;color:#888;background:color-mix(in srgb,#888 8%,transparent);font-size:10px;">⚙ DEBUG</button>
       </div>
     </div>
   </div>
@@ -1682,9 +1700,14 @@ async function secTriggerScan(ai){
   const btns=['secScanBtn','secScanClaude','secScanGemini'];
   btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=true;b.textContent='⟳ SCANNING...';}});
   const secAI=document.getElementById('secAI');
+  if(secAI)secAI.textContent='⟳ Sending scan request...';
+  console.log('[SEC] secTriggerScan called, ai='+ai);
   try{
+    console.log('[SEC] POSTing to /api/security/scan...');
     const res=await fetch('/api/security/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ai?{ai}:{})});
+    console.log('[SEC] Response status: '+res.status);
     const j=await res.json();
+    console.log('[SEC] Response JSON:', JSON.stringify(j));
     if(!j.ok){
       if(secAI)secAI.textContent='⚠ SCAN ERROR: '+j.error;
       const _labels={'secScanBtn':'▶ SCAN NOW','secScanClaude':'▶ CLAUDE','secScanGemini':'▶ GEMINI'};
@@ -1692,6 +1715,7 @@ async function secTriggerScan(ai){
       return;
     }
   }catch(e){
+    console.log('[SEC] FETCH ERROR: '+e.message);
     if(secAI)secAI.textContent='⚠ NETWORK ERROR: '+e.message;
     const _labels={'secScanBtn':'▶ SCAN NOW','secScanClaude':'▶ CLAUDE','secScanGemini':'▶ GEMINI'};
     btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=_labels[id];}});
@@ -1715,6 +1739,19 @@ async function secTriggerScan(ai){
       btns.forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=false;b.textContent=_labels[id];}});
     }
   },3000);
+}
+async function secDebug(){
+  const secAI=document.getElementById('secAI');
+  if(secAI)secAI.textContent='⟳ Fetching debug info...';
+  try{
+    const r=await fetch('/api/security/debug').then(r=>r.json());
+    const msg=JSON.stringify(r,null,2);
+    if(secAI)secAI.textContent=msg;
+    console.log('[SEC DEBUG]',r);
+    alert('DEBUG INFO (also in console):\n\n'+msg);
+  }catch(e){
+    alert('Debug fetch failed: '+e.message);
+  }
 }
 secLoad();setInterval(secLoad,30000);
 </script>'''
