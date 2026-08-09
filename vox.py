@@ -82,6 +82,7 @@ _TABLES=[
     "CREATE TABLE IF NOT EXISTS user_sessions(username TEXT PRIMARY KEY,last_seen TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS push_subscriptions(username TEXT NOT NULL,endpoint TEXT NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,PRIMARY KEY(username,endpoint))",
     "CREATE TABLE IF NOT EXISTS password_resets(id SERIAL PRIMARY KEY,username TEXT NOT NULL,temp_password TEXT,status TEXT DEFAULT 'pending',requested_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS scan_links(id SERIAL PRIMARY KEY,url TEXT UNIQUE NOT NULL,added_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
 ]
 
 def _do_init_db():
@@ -633,10 +634,14 @@ def _sec_get_session():
 
 _SEC_KNOWN_ROUTES=["/","/api/traffic/public"]
 
-def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES):
+def _sec_get_extra_links():
+    with db() as con: rows=fetchall(con,"SELECT url FROM scan_links ORDER BY created_at ASC")
+    return [r[0] for r in rows]
+
+def _sec_crawl(base_url,max_pages=_SEC_MAX_PAGES,extra_links=None):
     sess=_sec_get_session()
     base=base_url.rstrip("/")
-    seed=[base+r for r in _SEC_KNOWN_ROUTES]
+    seed=[base+r for r in _SEC_KNOWN_ROUTES]+(extra_links or [])
     visited,queue=[],seed;seen=set()
     domain=urllib.parse.urlparse(base_url).netloc
     _skip=['/api/']
@@ -762,7 +767,7 @@ def _sec_run_scan(ai_only=None):
     if not _SEC_TARGET: return {"error":"TARGET_URL not set"}
     state=_sec_load_state()
     hostname=urllib.parse.urlparse(_SEC_TARGET).netloc
-    pages,sess=_sec_crawl(_SEC_TARGET)
+    pages,sess=_sec_crawl(_SEC_TARGET,extra_links=_sec_get_extra_links())
     ssl_result=_sec_check_ssl(hostname)
     broken=_sec_broken_links(pages,sess)
     changes=_sec_content_changes(pages,state,sess)
@@ -831,6 +836,32 @@ def api_sec_status():
             if rpts: last=rpts[0].get("timestamp")
     return ok(scanning=_SEC_LOCK.locked(),last_scan=last,target=_SEC_TARGET,interval=_SEC_INTERVAL)
 
+@app.route("/api/security/links")
+def api_sec_links_list():
+    if e:=require_admin(): return e
+    with db() as con: rows=fetchall(con,"SELECT id,url,added_by,created_at FROM scan_links ORDER BY created_at DESC")
+    return ok(links=[{"id":r[0],"url":r[1],"added_by":r[2],"created_at":str(r[3])} for r in rows])
+
+@app.route("/api/security/links/add",methods=["POST"])
+def api_sec_links_add():
+    if e:=require_admin(): return e
+    url=(request.json or {}).get("url","").strip()
+    if not url: return err("URL REQUIRED")
+    if not re.match(r'^https?://',url): url="https://"+url
+    try:
+        with db() as con: execute(con,"INSERT INTO scan_links(url,added_by) VALUES(%s,%s)",(url,me()))
+    except psycopg2.errors.UniqueViolation: return err("URL ALREADY ADDED")
+    except Exception as ex: return err(str(ex))
+    return ok()
+
+@app.route("/api/security/links/remove",methods=["POST"])
+def api_sec_links_remove():
+    if e:=require_admin(): return e
+    lid=(request.json or {}).get("id")
+    if not lid: return err("MISSING ID")
+    with db() as con: execute(con,"DELETE FROM scan_links WHERE id=%s",(lid,))
+    return ok()
+
 @app.route("/security")
 def security_dashboard():
     if not is_admin(): return redirect("/")
@@ -850,6 +881,15 @@ def security_dashboard():
   </div>
   <style>@media(max-width:600px){#secHeaderBtns{width:100%;justify-content:flex-start;}}</style>
   <div id="secAlertBanner" style="display:none;background:#ff0033;color:#fff;padding:10px 14px;border-radius:8px;text-align:center;font-size:12px;letter-spacing:3px;margin-bottom:14px;animation:tcPulse 1.5s infinite;">&#9888; CRITICAL SECURITY ISSUES DETECTED — IMMEDIATE ACTION REQUIRED &#9888;</div>
+  <div style="border:1px solid var(--p30);border-radius:8px;padding:14px;margin-bottom:14px;">
+    <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128279; MANAGE SCAN LINKS</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input id="secLinkInput" class="field-plain" placeholder="https://example.com/page" style="flex:1;min-width:200px;margin:0;text-transform:none;">
+      <button class="btn-action" style="margin:0;padding:8px 16px;font-size:11px;" onclick="secAddLink()">&#10010; ADD</button>
+    </div>
+    <div id="secLinkErr" class="error-msg"></div>
+    <div id="secLinksList" style="margin-top:8px;font-size:11px;max-height:160px;overflow-y:auto;"></div>
+  </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;">
     <div style="border:1px solid var(--p);border-radius:8px;padding:14px;text-align:center;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:6px;">PAGES SCANNED</div>
@@ -902,6 +942,24 @@ def security_dashboard():
   <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; NEXT SCAN: <span id="secNextScan">—</span> &nbsp;|&nbsp; INTERVAL: <span id="secInterval">—</span> MIN</div>
 </div></div>
 <script>
+async function secLoadLinks(){
+  const d=await fetch('/api/security/links').then(r=>r.json()).catch(()=>({}));
+  const el=document.getElementById('secLinksList');
+  if(!d.ok||!d.links.length){el.innerHTML='<div style="opacity:.4;font-size:10px;">No extra links added yet.</div>';return;}
+  el.innerHTML=d.links.map(l=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span>${l.url}</span><button class="btn-action" style="margin:0;padding:3px 8px;font-size:10px;border-color:#f44;color:#f44;flex-shrink:0;" onclick="secRemoveLink(${l.id})">&#10006;</button></div>`).join('');
+}
+async function secAddLink(){
+  const inp=document.getElementById('secLinkInput'),errEl=document.getElementById('secLinkErr');
+  errEl.textContent='';
+  const url=inp.value.trim();
+  if(!url){errEl.textContent='ENTER A URL';return;}
+  const d=await fetch('/api/security/links/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})}).then(r=>r.json());
+  if(d.ok){inp.value='';secLoadLinks();}else{errEl.textContent='ERROR: '+d.error;}
+}
+async function secRemoveLink(id){
+  await fetch('/api/security/links/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  secLoadLinks();
+}
 async function secLoad(){
   const s=await fetch('/api/security/status').then(r=>r.json()).catch(()=>({}));
   if(s.ok){document.getElementById('secTarget').textContent=s.target||'';}
@@ -995,7 +1053,7 @@ async function secTriggerScan(ai){
     }
   },3000);
 }
-secLoad();setInterval(secLoad,30000);
+secLoadLinks();secLoad();setInterval(secLoad,30000);
 </script>'''
     return shell(content,user=user,theme=theme)
 
