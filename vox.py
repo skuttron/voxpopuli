@@ -917,7 +917,14 @@ def security_dashboard():
     <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#9672; AI ANALYSIS</div>
     <div id="secAI" style="font-size:12px;line-height:1.7;font-family:'Courier New',monospace;white-space:pre-wrap;opacity:.85;">Awaiting scan data...</div>
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+  <style>
+    #secResultsGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    #secResultsGrid .sec-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 8px;}
+    #secResultsGrid .sec-row>span{flex:1 1 160px;min-width:0;overflow-wrap:anywhere;word-break:break-word;}
+    #secResultsGrid .sec-row>button,#secResultsGrid .sec-row>a{flex:0 0 auto;}
+    @media(max-width:700px){#secResultsGrid{grid-template-columns:1fr;} #secResultsGrid > div[style*="grid-column:span 2"]{grid-column:auto;}}
+  </style>
+  <div id="secResultsGrid">
     <div style="border:1px solid var(--p30);border-radius:8px;padding:12px;">
       <div style="font-size:9px;opacity:.5;letter-spacing:2px;margin-bottom:8px;">&#128279; BROKEN LINKS</div>
       <div id="secBrokenList" style="font-size:11px;max-height:160px;overflow-y:auto;"></div>
@@ -982,10 +989,14 @@ async function secLoad(){
   if(!d.ok||!d.reports.length){document.getElementById('secAI').textContent='No scans yet. Click SCAN NOW.';return;}
   const r=d.reports[0];
   const crit=r.is_critical;
+  window._secCurrentReportTs=r.timestamp;
+  const dismissedTs=localStorage.getItem('secDismissedAlertTs');
+  const isDismissed=dismissedTs&&dismissedTs===r.timestamp;
   const banner=document.getElementById('secAlertBanner');
   if(crit){
-    if(!window._secAlertDismissed){banner.style.display='block';document.body.style.setProperty('--p','#ff2222');document.body.style.setProperty('--bg','#0a0000');document.body.style.setProperty('--ac','#330000');document.getElementById('secDismissBtn').style.display='inline-flex';}
-  }else{if(!window._secAlertDismissed){banner.style.display='none';document.getElementById('secDismissBtn').style.display='none';}}
+    if(!isDismissed){banner.style.display='block';document.body.style.setProperty('--p','#ff2222');document.body.style.setProperty('--bg','#0a0000');document.body.style.setProperty('--ac','#330000');document.getElementById('secDismissBtn').style.display='inline-flex';}
+    else{banner.style.display='none';document.getElementById('secDismissBtn').style.display='none';document.body.style.removeProperty('--p');document.body.style.removeProperty('--bg');document.body.style.removeProperty('--ac');}
+  }else{banner.style.display='none';document.getElementById('secDismissBtn').style.display='none';document.body.style.removeProperty('--p');document.body.style.removeProperty('--bg');document.body.style.removeProperty('--ac');}
   document.getElementById('secPages').textContent=r.pages_scanned??'—';
   const sslOk=r.ssl?.ok;const sslDays=r.ssl?.days_left??'?';
   document.getElementById('secSSL').textContent=sslOk?sslDays+'d':'⚠';
@@ -1015,25 +1026,25 @@ async function secLoad(){
       },1000);
     }
   }
-  const viewBtn=u=>`<button class="btn-action" style="margin:0;padding:2px 8px;font-size:9px;flex-shrink:0;" onclick="secViewLink('${u.replace(/'/g,"\\'")}')">&#128065; VIEW</button>`;
+  const viewBtn=u=>{const esc=u.replace(/'/g,"\\'");return `<button class="btn-action" style="margin:0;padding:2px 8px;font-size:9px;" onclick="secViewLink('${esc}')">&#128065; VIEW</button>`;};
   const bll=document.getElementById('secBrokenList');
-  bll.innerHTML=bl?r.broken_links.map(b=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--p10);"><span style="word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</span>${viewBtn(b.url)}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
+  bll.innerHTML=bl?r.broken_links.map(b=>`<div class="sec-row" style="padding:4px 0;border-bottom:1px solid var(--p10);"><span><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</span>${viewBtn(b.url)}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const hml=document.getElementById('secHarmfulList');
   hml.innerHTML=hm?r.harmful_content.map(h=>`
     <div style="padding:8px;margin-bottom:6px;border:1px solid #ff3355;border-radius:6px;background:#1a0005;">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;margin-bottom:4px;">
+      <div class="sec-row" style="margin-bottom:4px;">
         <span style="color:#ff3355;font-size:11px;font-weight:bold;">⚠ ${h.source?.toUpperCase()||'PAGE'} — ${h.url}</span>
-        ${h.timestamp?`<span style="opacity:.4;font-size:9px;">${new Date(h.timestamp).toLocaleString()}</span>`:''}
+        ${h.timestamp?`<span style="opacity:.4;font-size:9px;flex:0 0 auto;">${new Date(h.timestamp).toLocaleString()}</span>`:''}
       </div>
       ${h.username?`<div style="font-size:11px;margin-bottom:3px;">👤 <span style="color:#ff8800;">${h.username}</span></div>`:''}
       ${h.message?`<div style="font-size:11px;background:#0a0000;border-radius:4px;padding:5px 8px;margin-bottom:4px;word-break:break-word;opacity:.9;">"${h.message}"</div>`:''}
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-        <div style="font-size:9px;color:#ff3355;letter-spacing:1px;">KEYWORDS: ${h.keywords.join(', ')}</div>
+      <div class="sec-row">
+        <span style="font-size:9px;color:#ff3355;letter-spacing:1px;">KEYWORDS: ${h.keywords.join(', ')}</span>
         ${viewBtn(h.url)}
       </div>
     </div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const chl=document.getElementById('secChangesList');
-  chl.innerHTML=ch?r.content_changes.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--p10);"><span style="word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</span>${viewBtn(c.url)}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
+  chl.innerHTML=ch?r.content_changes.map(c=>`<div class="sec-row" style="padding:4px 0;border-bottom:1px solid var(--p10);"><span><span style="color:#ffaa00;">~</span> ${c.url}</span>${viewBtn(c.url)}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
   const pgl=document.getElementById('secPagesList');
   if(pgl){const pl=r.pages_list||[];pgl.innerHTML=pl.length?pl.map((p,i)=>`<div style="padding:3px 0;border-bottom:1px solid var(--p10);word-break:break-all;opacity:.8;"><span style="color:var(--p);margin-right:6px;">${i+1}.</span>${p}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">No data</div>';}
   const bar=document.getElementById('secHistoryBar');bar.innerHTML='';
@@ -1059,7 +1070,7 @@ function secCloseView(){
   document.getElementById('secViewFrame').src='about:blank';
 }
 function secDismissAlert(){
-  window._secAlertDismissed=true;
+  if(window._secCurrentReportTs)localStorage.setItem('secDismissedAlertTs',window._secCurrentReportTs);
   const banner=document.getElementById('secAlertBanner');
   if(banner)banner.style.display='none';
   const btn=document.getElementById('secDismissBtn');
