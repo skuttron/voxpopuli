@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from flask import Flask,request,session,redirect,jsonify,Response
-import psycopg2,psycopg2.extras,os,hashlib,datetime,urllib.request,re,html as _html,pathlib,json as _json,time
+import psycopg2,psycopg2.extras,os,hashlib,datetime,urllib.request,re,html as _html,pathlib,json as _json,time,secrets
 from contextlib import contextmanager
 from cryptography.fernet import Fernet
 # ── Security Scanner ──────────────────────────────────────────────────────────
@@ -13,11 +13,22 @@ except Exception: _anthropic_client=None
 
 _BASE=pathlib.Path(__file__).parent.resolve()
 app=Flask(__name__)
-app.secret_key=os.environ.get("SECRET_KEY","fallback-if-missing")
+
+def _require_env(name):
+    """Read a secret from the environment only. Never fall back to a
+    hardcoded value baked into source, since source can leak (repos,
+    logs, chat transcripts, etc)."""
+    val=os.environ.get(name,"")
+    if not val:
+        raise RuntimeError(f"{name} environment variable is not set. Refusing to start with an insecure default.")
+    return val
+
+app.secret_key=_require_env("SECRET_KEY")
 app.config['PERMANENT_SESSION_LIFETIME']=datetime.timedelta(days=90)
 app.config['SESSION_PERMANENT']=True
 app.config['SESSION_COOKIE_SAMESITE']='Lax'
 app.config['SESSION_COOKIE_HTTPONLY']=True
+app.config['SESSION_COOKIE_SECURE']=os.environ.get("FLASK_ENV","production")!="development"
 
 def get_database_url():
     url=os.environ.get("DATABASE_URL","")
@@ -31,11 +42,31 @@ ADMIN_USER="Eagleone"
 _KEY_FILE=str(_BASE/"secret.key")
 if not os.path.exists(_KEY_FILE): open(_KEY_FILE,"wb").write(Fernet.generate_key())
 fernet=Fernet(open(_KEY_FILE,"rb").read())
-VAPID_PUBLIC_KEY=os.environ.get("VAPID_PUBLIC_KEY","BAyH6Y_hbhzzmRgt3pd5Qa7guYKYKfsVCVIZsJGF0zYPfBupcKm24bduVIj4585JSjeeu3aeR19d4tBzlHgQIdU")
-VAPID_PRIVATE_KEY=os.environ.get("VAPID_PRIVATE_KEY","MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOqLakrDhZhnH_KBh5nwx2l0jyGfOWplqyE82s4Ryws2hRANCAAQMh-mP4W4c85kYLd6XeUGu4LmCmCn7FQlSGbCRhdM2D3wbqXCptuG3blSI-OfOSUo3nrt2nkdfXeLQc5R4ECHV")
+VAPID_PUBLIC_KEY=_require_env("VAPID_PUBLIC_KEY")
+VAPID_PRIVATE_KEY=_require_env("VAPID_PRIVATE_KEY")
 VAPID_CLAIMS={"sub":"mailto:admin@voxpopuli.app"}
 
-hash_pw=lambda pw:hashlib.sha256(pw.encode()).hexdigest()
+# ── Password hashing ─────────────────────────────────────────────────────────
+# Salted (via werkzeug's pbkdf2/scrypt) instead of bare sha256, which is fast
+# to brute-force with rainbow tables at scale. Legacy sha256 hashes already in
+# the DB are still verified correctly and silently upgraded on next login.
+def hash_pw(pw):
+    from werkzeug.security import generate_password_hash
+    return generate_password_hash(pw)
+
+def verify_pw(stored_hash,pw):
+    from werkzeug.security import check_password_hash
+    if not stored_hash: return False
+    if stored_hash.startswith(("pbkdf2:","scrypt:")):
+        return check_password_hash(stored_hash,pw)
+    return len(stored_hash)==64 and secrets.compare_digest(stored_hash,hashlib.sha256(pw.encode()).hexdigest())
+
+def _migrate_pw_if_legacy(username,stored_hash,pw):
+    if stored_hash and not stored_hash.startswith(("pbkdf2:","scrypt:")):
+        try:
+            with db() as con: execute(con,"UPDATE users SET password_hash=%s WHERE username=%s",(hash_pw(pw),username))
+        except Exception: pass
+
 get_ip=lambda:request.headers.get("X-Forwarded-For",request.remote_addr).split(",")[0].strip()
 logged_in=lambda:"username" in session
 me=lambda:session.get("username","")
@@ -410,7 +441,8 @@ def api_login():
     d=request.json or {};u,p=d.get("username","").strip(),d.get("password","")
     with db() as con:
         row=fetchone(con,"SELECT password_hash,theme FROM users WHERE username=%s",(u,))
-        if not row or row[0]!=hash_pw(p): return err("INVALID CREDENTIALS")
+        if not row or not verify_pw(row[0],p): return err("INVALID CREDENTIALS")
+    _migrate_pw_if_legacy(u,row[0],p)
     session["username"]=u;session["theme"]=row[1] or 'green';session.permanent=True;return ok()
 
 @app.route("/logout")
@@ -432,7 +464,7 @@ def api_change_password():
     if len(new_pw)<6: return err("PASSWORD TOO SHORT")
     with db() as con:
         row=fetchone(con,"SELECT password_hash FROM users WHERE username=%s",(me(),))
-        if not row or row[0]!=hash_pw(cur_pw): return err("CURRENT PASSWORD INCORRECT")
+        if not row or not verify_pw(row[0],cur_pw): return err("CURRENT PASSWORD INCORRECT")
         execute(con,"UPDATE users SET password_hash=%s WHERE username=%s",(hash_pw(new_pw),me()))
     return ok()
 
@@ -580,16 +612,21 @@ def icon_192(): return _svg_icon(192,108,34)
 @app.route("/icon-512.png")
 def icon_512(): return _svg_icon(512,285,90,sub_y=325,sub_text="VOX POPULI")
 
-@app.route("/reset-x7k9m2p4q8w3n6j1vb5")
-def emergency_reset():
-    new_pw="Vox2024!"
-    with db() as con: execute(con,"UPDATE users SET password_hash=%s WHERE username=%s",(hash_pw(new_pw),ADMIN_USER))
-    return "<h1 style='font-family:monospace;background:#000;color:#0f0;padding:40px;'>DONE! Login: Eagleone / Vox2024! — CHANGE YOUR PASSWORD AFTER LOGGING IN.</h1>"
+# NOTE: the old /reset-x7k9m2p4q8w3n6j1vb5 route has been removed. It let
+# anyone who discovered the URL reset the admin account's password to a
+# hardcoded value with zero authentication — a full account-takeover
+# backdoor. If you truly lock yourself out, reset the admin password
+# directly in the database (or via a one-off script you run yourself,
+# never a public route).
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    import traceback;app.logger.error(traceback.format_exc())
-    return f"<pre style='background:#111;color:#f44;padding:20px;font-size:12px;'>ERROR:\n{traceback.format_exc()}</pre>",500
+    import traceback,uuid
+    err_id=uuid.uuid4().hex[:8]
+    # Full trace goes to server logs only — never to the client, since it
+    # can contain file paths, SQL, and fragments of env/config values.
+    app.logger.error(f"[{err_id}] {traceback.format_exc()}")
+    return jsonify({"ok":False,"error":"INTERNAL SERVER ERROR","ref":err_id}),500
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECURITY HUB — integrated scanner
