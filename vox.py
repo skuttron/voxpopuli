@@ -4,7 +4,7 @@ import psycopg2,psycopg2.extras,os,hashlib,datetime,urllib.request,re,html as _h
 from contextlib import contextmanager
 from cryptography.fernet import Fernet
 # ── Security Scanner ──────────────────────────────────────────────────────────
-import ssl,socket,threading,urllib.parse
+import ssl,socket,threading,urllib.parse,ipaddress
 from bs4 import BeautifulSoup
 try:
     from anthropic import Anthropic as _Anthropic
@@ -114,6 +114,10 @@ _TABLES=[
     "CREATE TABLE IF NOT EXISTS push_subscriptions(username TEXT NOT NULL,endpoint TEXT NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,PRIMARY KEY(username,endpoint))",
     "CREATE TABLE IF NOT EXISTS password_resets(id SERIAL PRIMARY KEY,username TEXT NOT NULL,temp_password TEXT,status TEXT DEFAULT 'pending',requested_at TEXT DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS scan_links(id SERIAL PRIMARY KEY,url TEXT UNIQUE NOT NULL,added_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS security_events(id SERIAL PRIMARY KEY,ip TEXT NOT NULL,event_type TEXT NOT NULL,path TEXT,detail TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS ip_geo_cache(ip TEXT PRIMARY KEY,lat DOUBLE PRECISION,lon DOUBLE PRECISION,city TEXT,region TEXT,country TEXT,fetched_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_security_events_ip ON security_events(ip)",
 ]
 
 def _do_init_db():
@@ -141,7 +145,47 @@ def is_admin(u=None):
 def require_login():
     if not logged_in(): return err("NOT LOGGED IN")
 def require_admin():
-    if not is_admin(): return err("FORBIDDEN")
+    if not is_admin():
+        log_security_event(get_ip(),"admin_probe",path=request.path,detail=f"user={me() or 'anon'}")
+        return err("FORBIDDEN")
+
+# ── Security event logging + IP geolocation (for the hazard map) ────────────
+_PRIVATE_IP_PREFIXES=("10.","127.","172.16.","172.17.","172.18.","172.19.","172.2","172.30.","172.31.","192.168.","0.")
+
+def log_security_event(ip,event_type,path="",detail=""):
+    """Record a flagged/suspicious event (failed login, admin probing, etc.)
+    so it can be plotted on the admin hazard map. Never raises — logging
+    a security event should never itself break the request."""
+    if not ip: return
+    try:
+        with db() as con:
+            execute(con,"INSERT INTO security_events(ip,event_type,path,detail) VALUES(%s,%s,%s,%s)",(ip,event_type,path[:255],detail[:255]))
+    except Exception as e:
+        app.logger.warning(f"log_security_event failed: {e}")
+
+def _geolocate_ip(ip):
+    """Look up (and cache) approximate location for an IP. Returns None for
+    private/local IPs or on lookup failure — never raises."""
+    if not ip or ip.startswith(_PRIVATE_IP_PREFIXES) or ip in ("localhost","::1"):
+        return None
+    with db() as con:
+        row=fetchone(con,"SELECT lat,lon,city,region,country FROM ip_geo_cache WHERE ip=%s",(ip,))
+    if row and row[0] is not None:
+        return {"lat":row[0],"lon":row[1],"city":row[2],"region":row[3],"country":row[4]}
+    try:
+        import requests as _req
+        r=_req.get(f"https://ipapi.co/{ip}/json/",timeout=5)
+        d=r.json()
+        if d.get("error"): return None
+        lat,lon=d.get("latitude"),d.get("longitude")
+        if lat is None or lon is None: return None
+        city,region,country=d.get("city") or "",d.get("region") or "",d.get("country_name") or ""
+        with db() as con:
+            execute(con,"INSERT INTO ip_geo_cache(ip,lat,lon,city,region,country,fetched_at) VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (ip) DO UPDATE SET lat=EXCLUDED.lat,lon=EXCLUDED.lon,city=EXCLUDED.city,region=EXCLUDED.region,country=EXCLUDED.country,fetched_at=EXCLUDED.fetched_at",(ip,lat,lon,city,region,country,utc_now()))
+        return {"lat":lat,"lon":lon,"city":city,"region":region,"country":country}
+    except Exception as e:
+        app.logger.warning(f"geolocate failed for {ip}: {e}")
+        return None
 
 def send_push(username,title,body,tag="vox"):
     try:
@@ -441,7 +485,9 @@ def api_login():
     d=request.json or {};u,p=d.get("username","").strip(),d.get("password","")
     with db() as con:
         row=fetchone(con,"SELECT password_hash,theme FROM users WHERE username=%s",(u,))
-        if not row or not verify_pw(row[0],p): return err("INVALID CREDENTIALS")
+        if not row or not verify_pw(row[0],p):
+            log_security_event(get_ip(),"failed_login",path="/api/login",detail=f"username={u}")
+            return err("INVALID CREDENTIALS")
     _migrate_pw_if_legacy(u,row[0],p)
     session["username"]=u;session["theme"]=row[1] or 'green';session.permanent=True;return ok()
 
@@ -612,12 +658,17 @@ def icon_192(): return _svg_icon(192,108,34)
 @app.route("/icon-512.png")
 def icon_512(): return _svg_icon(512,285,90,sub_y=325,sub_text="VOX POPULI")
 
-# NOTE: the old /reset-x7k9m2p4q8w3n6j1vb5 route has been removed. It let
-# anyone who discovered the URL reset the admin account's password to a
-# hardcoded value with zero authentication — a full account-takeover
-# backdoor. If you truly lock yourself out, reset the admin password
-# directly in the database (or via a one-off script you run yourself,
-# never a public route).
+# The old /reset-x7k9m2p4q8w3n6j1vb5 backdoor no longer resets anything — it
+# let anyone who discovered the URL take over the admin account with zero
+# authentication. We keep the route registered as a tripwire: only someone
+# who saw the old source or an old bookmarked link would ever request it,
+# so a hit here is a strong signal of a targeted attacker, logged straight
+# into the hazard map. It always returns a plain 404, revealing nothing.
+@app.route("/reset-x7k9m2p4q8w3n6j1vb5")
+def _removed_backdoor_tripwire():
+    log_security_event(get_ip(),"backdoor_probe",path=request.path,detail="hit removed emergency-reset URL")
+    from flask import abort
+    abort(404)
 
 @app.errorhandler(Exception)
 def handle_exception(e):
@@ -641,10 +692,16 @@ _SEC_REPORTS_FILE= str(_BASE/"sec_reports.json")
 _SEC_LOCK        = threading.Lock()
 
 _HARMFUL_KEYWORDS=[
-    "kill","murder","terrorist","bomb","nazi","white supremacy",
-    "nigger","faggot","chink","spic","hate speech",
-    "rape","molest","child porn","hack the","sql injection",
-    "ddos","ransomware","phishing",
+    # Security-threat / attack-related terms only — this scanner flags pages
+    # whose content suggests a compromise, injected attack payload, or
+    # malicious instruction, not general content moderation.
+    "sql injection","hack the","hacked by","ddos","ransomware","phishing",
+    "malware","exploit","xss","cross-site scripting","csrf","backdoor",
+    "brute force","credential stuffing","zero-day","0day","rce",
+    "remote code execution","privilege escalation","reverse shell",
+    "shell uploaded","defaced","c2 server","command and control",
+    "keylogger","botnet","payload injection","sql error","stack trace",
+    "unauthorized access","data breach","leaked credentials","dump database",
 ]
 
 def _sec_load_state():
@@ -899,11 +956,41 @@ def api_sec_links_remove():
     with db() as con: execute(con,"DELETE FROM scan_links WHERE id=%s",(lid,))
     return ok()
 
+@app.route("/api/security/hazard-map")
+def api_sec_hazard_map():
+    if e:=require_admin(): return e
+    try: hours=max(1,min(int(request.args.get("hours",24*7)),24*90))
+    except ValueError: hours=24*7
+    cutoff=(datetime.datetime.utcnow()-datetime.timedelta(hours=hours)).isoformat()
+    with db() as con:
+        rows=fetchall(con,"SELECT ip,event_type,COUNT(*) FROM security_events WHERE created_at>=%s GROUP BY ip,event_type",(cutoff,))
+    by_ip={}
+    for ip,etype,cnt in rows:
+        e=by_ip.setdefault(ip,{"ip":ip,"events":{},"total":0})
+        e["events"][etype]=cnt;e["total"]+=cnt
+    # Geolocate only the busiest IPs per request, to stay within lookup limits
+    top=sorted(by_ip.values(),key=lambda x:-x["total"])[:60]
+    for entry in top:
+        geo=_geolocate_ip(entry["ip"])
+        if geo: entry.update(geo)
+    located=[e for e in top if e.get("lat") is not None]
+    return ok(points=located,total_events=sum(v["total"] for v in by_ip.values()),unique_ips=len(by_ip),hours=hours)
+
+@app.route("/api/security/hazard-events/clear",methods=["POST"])
+def api_sec_hazard_clear():
+    if e:=require_admin(): return e
+    with db() as con: execute(con,"DELETE FROM security_events")
+    return ok()
+
 @app.route("/security")
 def security_dashboard():
-    if not is_admin(): return redirect("/")
+    if not is_admin():
+        log_security_event(get_ip(),"admin_probe",path="/security",detail=f"user={me() or 'anon'}")
+        return redirect("/")
     user=me();theme=session.get("theme","green")
-    content='''<div style="width:min(100%,960px);margin:0 auto;padding:16px;box-sizing:border-box;">
+    content='''<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<div style="width:min(100%,960px);margin:0 auto;padding:16px;box-sizing:border-box;">
 <div style="border:2px solid var(--p);border-radius:var(--r);padding:20px;margin-bottom:20px;background:var(--p10);">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
     <h2 style="margin:0;letter-spacing:4px;font-size:clamp(14px,3vw,20px);">&#128737; SECURITY HUB</h2>
@@ -914,6 +1001,7 @@ def security_dashboard():
       <button class="btn-action" id="secScanClaude" onclick="secTriggerScan('claude')" style="padding:7px 14px;font-size:11px;border-color:#cc44ff;color:#cc44ff;">&#9654; CLAUDE</button>
       <button class="btn-action" id="secScanGemini" onclick="secTriggerScan('gemini')" style="padding:7px 14px;font-size:11px;border-color:#4488ff;color:#4488ff;">&#9654; GEMINI</button>
       <button class="btn-action" id="secDismissBtn" onclick="secDismissAlert()" style="display:none;padding:7px 18px;font-size:11px;border-color:#ff3355;color:#ff3355;">&#10006; DISMISS ALERT</button>
+      <button class="btn-action" id="hazardMapBtn" onclick="openHazardMap()" style="padding:7px 18px;font-size:11px;border-color:#ff8800;color:#ff8800;">&#128506; HAZARD MAP</button>
     </div>
   </div>
   <style>@media(max-width:600px){#secHeaderBtns{width:100%;justify-content:flex-start;}}</style>
@@ -998,6 +1086,27 @@ def security_dashboard():
       <iframe id="secViewFrame" src="about:blank" style="width:100%;height:min(70vh,600px);border:none;display:block;"></iframe>
     </div>
     <div style="font-size:9px;opacity:.4;margin-top:6px;">SOME SITES BLOCK EMBEDDING — USE "OPEN IN NEW TAB" IF THE PREVIEW STAYS BLANK.</div>
+  </div>
+</div>
+<div class="modal-overlay" id="hazardMapModal" style="align-items:center;">
+  <div class="modal-box" style="max-width:min(96vw,920px);width:100%;padding:14px;text-align:left;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+      <span style="font-size:12px;letter-spacing:2px;">&#128506; HAZARD MAP — ORIGIN OF FLAGGED ACTIVITY</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <select id="hazardMapRange" class="field-plain" style="margin:0;padding:6px 8px;font-size:10px;width:auto;" onchange="loadHazardMap()">
+          <option value="24">LAST 24H</option>
+          <option value="168" selected>LAST 7 DAYS</option>
+          <option value="720">LAST 30 DAYS</option>
+          <option value="2160">LAST 90 DAYS</option>
+        </select>
+        <button class="btn-action" style="margin:0;padding:6px 12px;font-size:10px;border-color:#f44;color:#f44;" onclick="clearHazardEvents()">&#128465; CLEAR LOG</button>
+        <button class="btn-action" style="margin:0;padding:6px 12px;font-size:10px;" onclick="closeHazardMap()">&#10006; CLOSE</button>
+      </div>
+    </div>
+    <div style="font-size:9px;opacity:.5;margin-bottom:8px;">FAILED LOGINS, UNAUTHORIZED ADMIN-ROUTE HITS, AND PROBES OF THE OLD BACKDOOR URL — PLOTTED BY IP LOCATION. DOT SIZE/COLOR = EVENT COUNT FROM THAT IP.</div>
+    <div id="hazardMapContainer" style="width:100%;height:min(58vh,460px);border:1px solid var(--p30);border-radius:8px;background:#0a0a0a;"></div>
+    <div id="hazardMapStats" style="font-size:10px;opacity:.6;margin-top:8px;"></div>
+    <div id="hazardMapList" style="font-size:11px;max-height:150px;overflow-y:auto;margin-top:6px;"></div>
   </div>
 </div>
 <script>
@@ -1133,6 +1242,42 @@ async function secTriggerScan(ai){
       document.getElementById('secScanGemini').textContent='▶ GEMINI';
     }
   },3000);
+}
+let _hazardMap=null,_hazardMarkers=[];
+function openHazardMap(){
+  document.getElementById('hazardMapModal').classList.add('open');
+  if(!_hazardMap && window.L){
+    _hazardMap=L.map('hazardMapContainer',{worldCopyJump:true}).setView([39.8,-98.6],4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap contributors',maxZoom:18}).addTo(_hazardMap);
+  }
+  setTimeout(()=>{if(_hazardMap)_hazardMap.invalidateSize();loadHazardMap();},120);
+}
+function closeHazardMap(){document.getElementById('hazardMapModal').classList.remove('open');}
+async function loadHazardMap(){
+  const statsEl=document.getElementById('hazardMapStats'),listEl=document.getElementById('hazardMapList');
+  const hours=document.getElementById('hazardMapRange').value;
+  statsEl.textContent='LOADING...';
+  const d=await fetch('/api/security/hazard-map?hours='+hours).then(r=>r.json()).catch(()=>({}));
+  if(_hazardMap){_hazardMarkers.forEach(m=>_hazardMap.removeLayer(m));_hazardMarkers=[];}
+  if(!d.ok){statsEl.textContent='ERROR LOADING HAZARD DATA';listEl.innerHTML='';return;}
+  const unresolved=(d.unique_ips||0)-(d.points?d.points.length:0);
+  statsEl.textContent=`${d.total_events||0} FLAGGED EVENT(S) FROM ${d.unique_ips||0} IP(S) — ${d.points?d.points.length:0} MAPPED — ${unresolved} UNRESOLVED LOCATION(S)`;
+  if(!d.points||!d.points.length){listEl.innerHTML='<div style="opacity:.4;">No flagged activity in this window — logins &amp; admin routes are being watched.</div>';return;}
+  d.points.forEach(p=>{
+    const color=p.total>=10?'#ff2222':p.total>=3?'#ffaa00':'#ffee00';
+    if(_hazardMap && p.lat!=null && p.lon!=null){
+      const marker=L.circleMarker([p.lat,p.lon],{radius:6+Math.min(14,p.total),color:color,fillColor:color,fillOpacity:.5,weight:2}).addTo(_hazardMap);
+      const breakdown=Object.entries(p.events||{}).map(([k,v])=>`${k}: ${v}`).join('<br>');
+      marker.bindPopup(`<b>${p.ip}</b><br>${p.city||''} ${p.region||''} ${p.country||''}<br>${breakdown}`);
+      _hazardMarkers.push(marker);
+    }
+  });
+  listEl.innerHTML=d.points.map(p=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><span>${p.ip} — ${p.city||'?'} ${p.country||''}</span><span style="opacity:.7;">${p.total} event(s)</span></div>`).join('');
+}
+async function clearHazardEvents(){
+  if(!confirm('CLEAR ALL LOGGED HAZARD EVENTS? THIS CANNOT BE UNDONE.'))return;
+  await fetch('/api/security/hazard-events/clear',{method:'POST'});
+  loadHazardMap();
 }
 secLoadLinks();secLoad();setInterval(secLoad,30000);
 </script>'''
