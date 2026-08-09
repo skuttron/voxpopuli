@@ -941,6 +941,21 @@ def security_dashboard():
   </div>
   <div style="margin-top:12px;font-size:9px;opacity:.35;text-align:right;letter-spacing:1px;">LAST SCAN: <span id="secLastScan">—</span> &nbsp;|&nbsp; NEXT SCAN: <span id="secNextScan">—</span> &nbsp;|&nbsp; INTERVAL: <span id="secInterval">—</span> MIN</div>
 </div></div>
+<div class="modal-overlay" id="secViewModal" style="align-items:center;">
+  <div class="modal-box" style="max-width:min(94vw,900px);width:100%;padding:14px;text-align:left;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+      <span id="secViewUrl" style="font-size:11px;opacity:.7;word-break:break-all;flex:1;"></span>
+      <div style="display:flex;gap:6px;flex-shrink:0;">
+        <a id="secViewOpenTab" href="#" target="_blank" rel="noopener" class="btn-action" style="margin:0;padding:6px 12px;font-size:10px;">&#8599; OPEN IN NEW TAB</a>
+        <button class="btn-action" style="margin:0;padding:6px 12px;font-size:10px;border-color:#f44;color:#f44;" onclick="secCloseView()">&#10006; CLOSE</button>
+      </div>
+    </div>
+    <div style="border:1px solid var(--p30);border-radius:8px;overflow:hidden;background:#111;">
+      <iframe id="secViewFrame" src="about:blank" style="width:100%;height:min(70vh,600px);border:none;display:block;"></iframe>
+    </div>
+    <div style="font-size:9px;opacity:.4;margin-top:6px;">SOME SITES BLOCK EMBEDDING — USE "OPEN IN NEW TAB" IF THE PREVIEW STAYS BLANK.</div>
+  </div>
+</div>
 <script>
 async function secLoadLinks(){
   const d=await fetch('/api/security/links').then(r=>r.json()).catch(()=>({}));
@@ -1000,8 +1015,9 @@ async function secLoad(){
       },1000);
     }
   }
+  const viewBtn=u=>`<button class="btn-action" style="margin:0;padding:2px 8px;font-size:9px;flex-shrink:0;" onclick="secViewLink('${u.replace(/'/g,"\\'")}')">&#128065; VIEW</button>`;
   const bll=document.getElementById('secBrokenList');
-  bll.innerHTML=bl?r.broken_links.map(b=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
+  bll.innerHTML=bl?r.broken_links.map(b=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--p10);"><span style="word-break:break-all;"><span style="color:#ffaa00;">[${b.status}]</span> ${b.url}</span>${viewBtn(b.url)}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const hml=document.getElementById('secHarmfulList');
   hml.innerHTML=hm?r.harmful_content.map(h=>`
     <div style="padding:8px;margin-bottom:6px;border:1px solid #ff3355;border-radius:6px;background:#1a0005;">
@@ -1011,10 +1027,13 @@ async function secLoad(){
       </div>
       ${h.username?`<div style="font-size:11px;margin-bottom:3px;">👤 <span style="color:#ff8800;">${h.username}</span></div>`:''}
       ${h.message?`<div style="font-size:11px;background:#0a0000;border-radius:4px;padding:5px 8px;margin-bottom:4px;word-break:break-word;opacity:.9;">"${h.message}"</div>`:''}
-      <div style="font-size:9px;color:#ff3355;letter-spacing:1px;">KEYWORDS: ${h.keywords.join(', ')}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <div style="font-size:9px;color:#ff3355;letter-spacing:1px;">KEYWORDS: ${h.keywords.join(', ')}</div>
+        ${viewBtn(h.url)}
+      </div>
     </div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ None detected</div>';
   const chl=document.getElementById('secChangesList');
-  chl.innerHTML=ch?r.content_changes.map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--p10);word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
+  chl.innerHTML=ch?r.content_changes.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--p10);"><span style="word-break:break-all;"><span style="color:#ffaa00;">~</span> ${c.url}</span>${viewBtn(c.url)}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">✓ No changes</div>';
   const pgl=document.getElementById('secPagesList');
   if(pgl){const pl=r.pages_list||[];pgl.innerHTML=pl.length?pl.map((p,i)=>`<div style="padding:3px 0;border-bottom:1px solid var(--p10);word-break:break-all;opacity:.8;"><span style="color:var(--p);margin-right:6px;">${i+1}.</span>${p}</div>`).join(''):'<div style="opacity:.4;font-size:10px;">No data</div>';}
   const bar=document.getElementById('secHistoryBar');bar.innerHTML='';
@@ -1024,6 +1043,20 @@ async function secLoad(){
     const col=rpt.harmful_content?.length>0?'#ff3355':issues>3?'#ffaa00':'var(--p)';
     bar.innerHTML+=`<div title="${new Date(rpt.timestamp).toLocaleString()} — ${issues} issues" style="flex:1;min-width:6px;height:${h}px;background:${col};border-radius:2px 2px 0 0;align-self:flex-end;cursor:pointer;"></div>`;
   });
+}
+function secViewLink(url){
+  const modal=document.getElementById('secViewModal');
+  const frame=document.getElementById('secViewFrame');
+  const link=document.getElementById('secViewOpenTab');
+  const label=document.getElementById('secViewUrl');
+  label.textContent=url;
+  link.href=url;
+  frame.src=url;
+  modal.classList.add('open');
+}
+function secCloseView(){
+  document.getElementById('secViewModal').classList.remove('open');
+  document.getElementById('secViewFrame').src='about:blank';
 }
 function secDismissAlert(){
   window._secAlertDismissed=true;
